@@ -1,0 +1,11 @@
+/terminal
+/mode trace=on
+/atr
+
+/select F0|mDL-ICApplet
+
+
+/send 80910000#(1904D2)
+
+
+#/close
