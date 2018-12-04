@@ -18,6 +18,7 @@
 package org.isodl.mdl;
 
 import javacard.framework.Util;
+import javacardx.framework.math.BigNumber;
 
 public class CBORDecoder {
 
@@ -85,7 +86,7 @@ public class CBORDecoder {
         return (byte) ((cborInput[offset] & MAJOR_TYPE_MASK) >> 5);
     }
 
-    public static short getCurrentInt8(byte[] cborInput, short offset) {
+    public static short readInt8(byte[] cborInput, short offset) {
         byte eventlength = (byte) (cborInput[offset] & ADDINFO_MASK);
         if(eventlength < ONE_BYTE) {
             return eventlength;  
@@ -95,7 +96,7 @@ public class CBORDecoder {
         return -1;
     }
 
-    public static short getCurrentInt16(byte[] cborInput, short offset) {
+    public static short readInt16(byte[] cborInput, short offset) {
         byte addInfo = (byte) (cborInput[offset] & ADDINFO_MASK);
         if(addInfo == TWO_BYTES) {
             return Util.getShort(cborInput, (short) (offset+1));  
@@ -103,57 +104,28 @@ public class CBORDecoder {
         return -1;
     }
 
-    public static byte getNrOfLengthBytes(byte[] cborInput, short offset) {
+    public static byte getIntegerSize(byte[] cborInput, short offset) {
         byte eventlength = (byte) (cborInput[offset] & ADDINFO_MASK);
-        byte bytes = -1;
-        
         if(eventlength < ONE_BYTE) {
-            bytes = 1; // add one for the initial major type byte
+            return 1;
         } else {
             switch(eventlength) {
             case ONE_BYTE:
-                bytes = 2;
+                return 1;
             case TWO_BYTES:
-                bytes = 3;
+                return 2;
             case FOUR_BYTES:
-                bytes = 5;
+                return 4;
             case EIGHT_BYTES:
-                bytes = 9;
-            default: //  
-                bytes = -1;
-            }
+                return 8;
+            default:   
+                return -1;
+            } 
         }
-        return bytes;
     }
-//
-//    public static short getCurrentInteger(byte[] cborInput, short offset) {
-//        byte addInfo = (byte) (cborInput[offset] & CBORConstants.ADDINFO_MASK);
-//        short value = -1;
-//        if(addInfo < CBORConstants.ONE_BYTE) {
-//            value = addInfo; 
-//        } else {
-//            switch(addInfo) {
-//            case CBORConstants.ONE_BYTE:
-//                value = cborInput[offset+1];
-//            case CBORConstants.TWO_BYTES:
-//                value = javacard.framework.Util.getShort(cborInput,(short) (offset+1));
-//            case CBORConstants.FOUR_BYTES:
-//            case CBORConstants.EIGHT_BYTES:
-//            default: 
-//                value = -1;
-//            }
-//        }
-//        return value;
-//    }
     
-    public static short getCurrentValue(byte[] cborInput, short offset) {
+    public static short getCurrentValueAsArray(byte[] cborInput, short offset, byte[] outBuffer, short outOffset) {
 
         return 0;
     }
-    
-    public short getCurrentByteString(byte[] outByteString, short offset) {
-
-        return 0;
-    }
-
 }

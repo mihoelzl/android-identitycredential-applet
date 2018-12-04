@@ -17,20 +17,13 @@
 
 package org.isodl.mdl;
 
-import com.nxp.id.jcopx.security.CipherX;
-import com.nxp.id.jcopx.security.CryptoBaseX;
-import com.nxp.id.jcopx.security.KeyAgreementX;
-
 import javacard.framework.APDU;
 import javacard.framework.Applet;
 import javacard.framework.ISOException;
 import javacard.framework.Util;
 import javacard.security.AESKey;
-import javacard.security.Key;
 import javacard.security.KeyBuilder;
-import javacard.security.KeyPair;
 import javacardx.apdu.ExtendedLength;
-import javacardx.crypto.Cipher;
 
 /**
  * @author michaelhoelzl
@@ -125,7 +118,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
                 
         switch(CBORDecoder.readMajorType(receiveBuffer, mSecurityManager.getOffsetCData())) {
         case CBORDecoder.TYPE_UNSIGNED_INTEGER:
-            short val = CBORDecoder.getCurrentInt16(receiveBuffer, mSecurityManager.getOffsetCData());
+            short val = CBORDecoder.readInt16(receiveBuffer, mSecurityManager.getOffsetCData());
             Util.setShort(outBuffer, (short) 0, val);
             break;
         }
