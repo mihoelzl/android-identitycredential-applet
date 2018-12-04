@@ -1,5 +1,23 @@
+/*
+**
+** Copyright 2018, The Android Open Source Project
+**
+** Licensed under the Apache License, Version 2.0 (the "License");
+** you may not use this file except in compliance with the License.
+** You may obtain a copy of the License at
+**
+**     http://www.apache.org/licenses/LICENSE-2.0
+**
+** Unless required by applicable law or agreed to in writing, software
+** distributed under the License is distributed on an "AS IS" BASIS,
+** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+** See the License for the specific language governing permissions and
+** limitations under the License.
+*/
+
 package org.isodl.mdl;
 
+import javacard.framework.JCSystem;
 import javacardx.framework.util.intx.JCint;
 
 public class CBORDecoder {
@@ -20,13 +38,16 @@ public class CBORDecoder {
     static final byte EVENT_VALUE_ARRAY_END = (byte) 0x31;
     static final byte EVENT_VALUE_MAP = (byte) 0x40;
 
-    private byte mCurrentEvent;
+    private static final short VALUE_OFFSET = 0;
+    private static final short STATUS_VALUES_SIZE = 1;
     
     private byte[] mCurrentBuffer;
+    private short[] mStatusWords;
     
     public CBORDecoder(){
-        
+        mStatusWords = JCSystem.makeTransientShortArray(STATUS_VALUES_SIZE, JCSystem.CLEAR_ON_DESELECT);        
     }
+    
     /**
      * Feed input data to the decoder. The decoder will copy the data in a separate
      * buffer and interpret the next event. If the next event cannot be fully
@@ -35,20 +56,13 @@ public class CBORDecoder {
      * @param cborInput
      * @param offset
      * @param length
-     * @return Number of bytes read from the input and interpreted.
      */
-    public short feed(byte[] cborInput, short offset, short length) {
-        if(length==0) {
-            mCurrentEvent = EVENT_NEED_MORE_INPUT;
-            return mCurrentEvent;
-        }
+    public void feed(byte[] cborInput, short offset, short length) {
+//        if(length==0) {
+//            mCurrentEvent = EVENT_NEED_MORE_INPUT;
+//        }
         mCurrentBuffer = cborInput;
-        return 0;
-    }
-
-    public short finish() {
-
-        return 0;
+        mStatusWord[] = offset;
     }
 
     /**
@@ -56,8 +70,7 @@ public class CBORDecoder {
      * 
      * @return
      */
-    public byte nextEvent() {
-        int t = JCint.getInt(mCurrentBuffer, (short)0);
+    final public byte nextEvent() {
         
         byte length = (byte) (mCurrentBuffer[0] & CBORConstants.ADDINFO_MASK);
         byte value;

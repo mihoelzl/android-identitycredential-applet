@@ -1,6 +1,20 @@
-/**
- * 
- */
+/*
+**
+** Copyright 2018, The Android Open Source Project
+**
+** Licensed under the Apache License, Version 2.0 (the "License");
+** you may not use this file except in compliance with the License.
+** You may obtain a copy of the License at
+**
+**     http://www.apache.org/licenses/LICENSE-2.0
+**
+** Unless required by applicable law or agreed to in writing, software
+** distributed under the License is distributed on an "AS IS" BASIS,
+** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+** See the License for the specific language governing permissions and
+** limitations under the License.
+*/
+
 package org.isodl.mdl;
 
 import com.nxp.id.jcopx.security.CipherX;
@@ -24,7 +38,6 @@ import javacardx.crypto.Cipher;
 public class ICStoreApplet extends Applet {
 
     public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x01 };
-    public final static byte ICStore_CLA = (byte) 0xB0;
 
     private APDUManager mSecurityManager;
 
@@ -114,21 +127,17 @@ public class ICStoreApplet extends Applet {
         short pos = mSecurityManager.getOffsetCData();
         byte event = CBORDecoder.EVENT_NEED_MORE_INPUT;
         
+        cborDecoder.feed(receiveBuffer, pos, (short) (receivingLength-pos));
+
         while (event != CBORDecoder.EVENT_EOF){
-            while ((event = cborDecoder.nextEvent()) == CBORDecoder.EVENT_NEED_MORE_INPUT) {
-                pos += cborDecoder.feed(receiveBuffer, pos, (short) (receivingLength-pos));
-
-                if (pos == receivingLength) {
-                    cborDecoder.finish();
-                }
-            }
-
-            if (event == CBORDecoder.EVENT_ERROR) {
+            switch(cborDecoder.nextEvent()) {
+            case CBORDecoder.EVENT_ERROR:
                 ISOException.throwIt(ISO7816.SW_DATA_INVALID);
-            }
-            if (event == CBORDecoder.EVENT_VALUE_INT16) {
+                break;
+            case CBORDecoder.EVENT_VALUE_INT16:
                 short val = cborDecoder.getCurrentShort();
                 Util.setShort(outBuffer, (short) 0, val);
+                break;
             }
         } 
         mSecurityManager.setOutgoingLength((short)2);
@@ -141,7 +150,7 @@ public class ICStoreApplet extends Applet {
     private void processGetVersion() {
         final byte[] inBuffer = APDU.getCurrentAPDUBuffer();
 
-        if ((inBuffer[ISO7816.OFFSET_P1] != 0) || (inBuffer[ISO7816.OFFSET_P2] != 0)) {
+        if (Util.getShort(inBuffer, ISO7816.OFFSET_P1) != 0x0) {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
 

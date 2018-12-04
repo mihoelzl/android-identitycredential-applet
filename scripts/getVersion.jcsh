@@ -5,7 +5,7 @@
 /select F0|mDL-ICApplet
 
 
-/send B010000000
+/send 8050000000
 
 
 #/close
