@@ -33,17 +33,16 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
     public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x01 };
 
-    private APDUManager mSecurityManager;
+    private APDUManager mAPDUManager;
 
-    private AESKey key;
+    private CryptoManager mCryptoManager;
     
     private ICStoreApplet() {
-        mSecurityManager = new APDUManager();
+        mAPDUManager = new APDUManager();
         
-        key = (AESKey)KeyBuilder.buildKey(KeyBuilder.TYPE_AES_TRANSIENT_DESELECT,
-                KeyBuilder.LENGTH_AES_128,
-                false);
+        mCryptoManager = new CryptoManager();
     }
+    
 
     public static void install(byte[] bArray, short bOffset, byte bLength) {
         new ICStoreApplet().register(bArray, (short) (bOffset + 1), bArray[bOffset]);
@@ -51,11 +50,11 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
     public void process(APDU apdu) {
         if (this.selectingApplet()) {
-            mSecurityManager.reset();
+            mAPDUManager.reset();
             return;
         }
 
-        if (!mSecurityManager.process(apdu)) {
+        if (!mAPDUManager.process(apdu)) {
             return;
         }
 
@@ -90,7 +89,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             }
         } 
 
-        mSecurityManager.sendAll();
+        mAPDUManager.sendAll();
     }
 
     private void processEncryptEntries()
@@ -110,19 +109,19 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     }
     
     private void processTestCBOR() {        
-        short receivingLength = mSecurityManager.receiveAll();
-        byte[] receiveBuffer = mSecurityManager.getReceiveBuffer();
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         
-        short le = mSecurityManager.setOutgoing();
-        byte[] outBuffer = mSecurityManager.getSendBuffer();
+        short le = mAPDUManager.setOutgoing();
+        byte[] outBuffer = mAPDUManager.getSendBuffer();
                 
-        switch(CBORDecoder.readMajorType(receiveBuffer, mSecurityManager.getOffsetCData())) {
+        switch(CBORDecoder.readMajorType(receiveBuffer, mAPDUManager.getOffsetCData())) {
         case CBORDecoder.TYPE_UNSIGNED_INTEGER:
-            short val = CBORDecoder.readInt16(receiveBuffer, mSecurityManager.getOffsetCData());
+            short val = CBORDecoder.readInt16(receiveBuffer, mAPDUManager.getOffsetCData());
             Util.setShort(outBuffer, (short) 0, val);
             break;
         }
-        mSecurityManager.setOutgoingLength((short)2);
+        mAPDUManager.setOutgoingLength((short)2);
     }
 
     private void processGetEntry() {
@@ -136,8 +135,8 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
 
-        short le = mSecurityManager.setOutgoing();
-        final byte[] outBuffer = mSecurityManager.getSendBuffer();
+        short le = mAPDUManager.setOutgoing();
+        final byte[] outBuffer = mAPDUManager.getSendBuffer();
 
         if (le < (short) VERSION.length) {
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
@@ -149,6 +148,6 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         } catch (ArrayIndexOutOfBoundsException e) {
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         }
-        mSecurityManager.setOutgoingLength(outLength);
+        mAPDUManager.setOutgoingLength(outLength);
     }
 }
