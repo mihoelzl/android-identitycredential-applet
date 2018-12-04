@@ -29,13 +29,14 @@ import javacard.security.AESKey;
 import javacard.security.Key;
 import javacard.security.KeyBuilder;
 import javacard.security.KeyPair;
+import javacardx.apdu.ExtendedLength;
 import javacardx.crypto.Cipher;
 
 /**
  * @author michaelhoelzl
  *
  */
-public class ICStoreApplet extends Applet {
+public class ICStoreApplet extends Applet implements ExtendedLength {
 
     public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x01 };
 
@@ -115,31 +116,19 @@ public class ICStoreApplet extends Applet {
         
     }
     
-    private void processTestCBOR() {
-        CBORDecoder cborDecoder = new CBORDecoder();
-        
+    private void processTestCBOR() {        
         short receivingLength = mSecurityManager.receiveAll();
         byte[] receiveBuffer = mSecurityManager.getReceiveBuffer();
         
         short le = mSecurityManager.setOutgoing();
         byte[] outBuffer = mSecurityManager.getSendBuffer();
                 
-        short pos = mSecurityManager.getOffsetCData();
-        byte event = CBORDecoder.EVENT_NEED_MORE_INPUT;
-        
-        cborDecoder.feed(receiveBuffer, pos, (short) (receivingLength-pos));
-
-        while (event != CBORDecoder.EVENT_EOF){
-            switch(cborDecoder.nextEvent()) {
-            case CBORDecoder.EVENT_ERROR:
-                ISOException.throwIt(ISO7816.SW_DATA_INVALID);
-                break;
-            case CBORDecoder.EVENT_VALUE_INT16:
-                short val = cborDecoder.getCurrentShort();
-                Util.setShort(outBuffer, (short) 0, val);
-                break;
-            }
-        } 
+        switch(CBORDecoder.readMajorType(receiveBuffer, mSecurityManager.getOffsetCData())) {
+        case CBORDecoder.TYPE_UNSIGNED_INTEGER:
+            short val = CBORDecoder.getCurrentInt16(receiveBuffer, mSecurityManager.getOffsetCData());
+            Util.setShort(outBuffer, (short) 0, val);
+            break;
+        }
         mSecurityManager.setOutgoingLength((short)2);
     }
 
