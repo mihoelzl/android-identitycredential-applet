@@ -24,7 +24,9 @@ import com.nxp.id.jcopx.security.CryptoBaseX;
 
 import javacard.framework.JCSystem;
 import javacard.security.AESKey;
+import javacard.security.ECKey;
 import javacard.security.KeyBuilder;
+import javacard.security.KeyPair;
 import javacard.security.RandomData;
 import javacardx.crypto.Cipher;
 
@@ -45,6 +47,8 @@ public class CryptoManager {
         mTempBuffer = JCSystem.makeTransientByteArray((short)64, JCSystem.CLEAR_ON_DESELECT);
         mRandom = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
         mRandom.generateData(mTempBuffer, (short)0, (short)32);
+        
+        mHBK = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_256, false);
         mHBK.setKey(mTempBuffer, (short)0);
     }
 

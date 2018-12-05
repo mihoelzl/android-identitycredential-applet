@@ -86,12 +86,12 @@ public class CBORDecoder {
         return (byte) ((cborInput[offset] & MAJOR_TYPE_MASK) >> 5);
     }
 
-    public static short readInt8(byte[] cborInput, short offset) {
+    public static byte readInt8(byte[] cborInput, short offset) {
         byte eventlength = (byte) (cborInput[offset] & ADDINFO_MASK);
         if(eventlength < ONE_BYTE) {
             return eventlength;  
         } else if(eventlength == ONE_BYTE) {
-            return (short)(cborInput[(short)(offset+1)] & 0xff);              
+            return (byte)(cborInput[(short)(offset+1)] & 0xff);              
         }
         return -1;
     }

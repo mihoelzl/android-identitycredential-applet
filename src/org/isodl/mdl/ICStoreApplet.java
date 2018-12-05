@@ -81,7 +81,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             case (byte) ISO7816.INS_ICS_GET_ENTRY:
                 processGetEntry();
                 break;
-            case (byte) ISO7816.INS_ICS_TEST:
+            case (byte) ISO7816.INS_ICS_TEST_CBOR:
                 processTestCBOR();
                 break;
             default:
@@ -111,17 +111,42 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     private void processTestCBOR() {        
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetCData();
         
         short le = mAPDUManager.setOutgoing();
         byte[] outBuffer = mAPDUManager.getSendBuffer();
-                
-        switch(CBORDecoder.readMajorType(receiveBuffer, mAPDUManager.getOffsetCData())) {
+        short outLength = 0;
+        
+        switch(CBORDecoder.readMajorType(receiveBuffer, inOffset)) {
         case CBORDecoder.TYPE_UNSIGNED_INTEGER:
-            short val = CBORDecoder.readInt16(receiveBuffer, mAPDUManager.getOffsetCData());
-            Util.setShort(outBuffer, (short) 0, val);
+        case CBORDecoder.TYPE_NEGATIVE_INTEGER:
+            if(CBORDecoder.getIntegerSize(receiveBuffer, inOffset) == 1) {
+                outBuffer[0] = CBORDecoder.readInt8(receiveBuffer, inOffset);
+                outLength = 1;
+            } else if(CBORDecoder.getIntegerSize(receiveBuffer, inOffset) == 2) {
+                Util.setShort(outBuffer, (short) 0, CBORDecoder.readInt16(receiveBuffer, inOffset));
+                outLength = 2;
+            } 
             break;
+        case CBORDecoder.TYPE_BYTE_STRING:
+        case CBORDecoder.TYPE_TEXT_STRING:
+            outLength = 2;
+            break;
+        case CBORDecoder.TYPE_ARRAY:
+            outLength = 2;
+            break;
+        case CBORDecoder.TYPE_MAP:
+            outLength = 2;
+            break;
+        case CBORDecoder.TYPE_TAG:
+            outLength = 2;
+            break;
+        case CBORDecoder.TYPE_FLOAT:
+            outLength = 2;
+            break;
+            
         }
-        mAPDUManager.setOutgoingLength((short)2);
+        mAPDUManager.setOutgoingLength(outLength);
     }
 
     private void processGetEntry() {
