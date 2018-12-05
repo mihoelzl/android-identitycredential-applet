@@ -21,8 +21,6 @@ import javacard.framework.APDU;
 import javacard.framework.Applet;
 import javacard.framework.ISOException;
 import javacard.framework.Util;
-import javacard.security.AESKey;
-import javacard.security.KeyBuilder;
 import javacardx.apdu.ExtendedLength;
 
 /**
@@ -71,17 +69,17 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             }
         } else {
             switch (buf[ISO7816.OFFSET_INS]) {
-            case (byte) ISO7816.INS_ICS_GET_VERSION:
+            case ISO7816.INS_ICS_GET_VERSION:
                 processGetVersion();
                 break;
 
-            case (byte) ISO7816.INS_ICS_ENCRYPT_ENTRIES:
+            case ISO7816.INS_ICS_ENCRYPT_ENTRIES:
                 processEncryptEntries();
                 break;
-            case (byte) ISO7816.INS_ICS_GET_ENTRY:
+            case ISO7816.INS_ICS_GET_ENTRY:
                 processGetEntry();
                 break;
-            case (byte) ISO7816.INS_ICS_TEST_CBOR:
+            case ISO7816.INS_ICS_TEST_CBOR:
                 processTestCBOR();
                 break;
             default:
@@ -108,10 +106,10 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         
     }
     
-    private void processTestCBOR() {        
+    private void processTestCBOR() {
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
-        short inOffset = mAPDUManager.getOffsetCData();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
         
         short le = mAPDUManager.setOutgoing();
         byte[] outBuffer = mAPDUManager.getSendBuffer();
@@ -126,6 +124,9 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             } else if(CBORDecoder.getIntegerSize(receiveBuffer, inOffset) == 2) {
                 Util.setShort(outBuffer, (short) 0, CBORDecoder.readInt16(receiveBuffer, inOffset));
                 outLength = 2;
+//            } else if(CBORDecoder.getIntegerSize(receiveBuffer, inOffset) == 4) {
+//                JCint.setInt(outBuffer, (short) 0, CBORDecoder.readInt32(receiveBuffer, inOffset));
+//                outLength = 4;
             } 
             break;
         case CBORDecoder.TYPE_BYTE_STRING:
@@ -145,6 +146,10 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             outLength = 2;
             break;
             
+        }
+        
+        if(le < outLength) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         }
         mAPDUManager.setOutgoingLength(outLength);
     }

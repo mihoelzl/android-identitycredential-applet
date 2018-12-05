@@ -30,7 +30,7 @@ public class APDUManager {
     private static final short VALUE_OUTGOING_EXPECTED_LENGTH = 0;
     private static final short VALUE_OUTGOING_LENGTH = 1;
     private static final short VALUE_INCOMING_LENGTH = 2;
-    private static final short VALUE_CDATA_OFFSET = 3;
+    private static final short VALUE_INCOMING_DATA_OFFSET = 3;
     private static final short STATUS_VALUES_SIZE = 4;
 
     private final byte[] mStatusFlags;
@@ -64,7 +64,7 @@ public class APDUManager {
         mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH] = 0;
         mStatusValues[VALUE_OUTGOING_LENGTH] = 0;
         mStatusValues[VALUE_INCOMING_LENGTH] = 0;
-        mStatusValues[VALUE_CDATA_OFFSET] = 0;
+        mStatusValues[VALUE_INCOMING_DATA_OFFSET] = 0;
 
         ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING, false);
         ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED, false);
@@ -96,8 +96,8 @@ public class APDUManager {
         return mReceiveBuffer;
     }
 
-    public short getOffsetCData() {
-        return mStatusValues[VALUE_CDATA_OFFSET];
+    public short getOffsetIncomingData() {
+        return mStatusValues[VALUE_INCOMING_DATA_OFFSET];
     }
 
     public short getReceivingLength() {
@@ -121,10 +121,10 @@ public class APDUManager {
                 ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
             }
             
-            Util.arrayCopyNonAtomic(apduBuffer, receiveOffset, receiveBuffer, receiveOffset, bytesReceived);
+            Util.arrayCopyNonAtomic(apduBuffer, receiveOffset, receiveBuffer, (short)0, bytesReceived);
             
             mStatusValues[VALUE_INCOMING_LENGTH] = lc;
-            mStatusValues[VALUE_CDATA_OFFSET] = receiveOffset;
+            mStatusValues[VALUE_INCOMING_DATA_OFFSET] = (short)0;
             
             ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED, true);
             

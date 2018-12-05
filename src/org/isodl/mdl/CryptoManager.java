@@ -29,6 +29,7 @@ import javacard.security.KeyBuilder;
 import javacard.security.KeyPair;
 import javacard.security.RandomData;
 import javacardx.crypto.Cipher;
+import javacardx.framework.util.intx.JCint;
 
 public class CryptoManager {
 

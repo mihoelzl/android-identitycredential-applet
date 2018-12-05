@@ -32,7 +32,7 @@ public interface ISO7816 extends javacard.framework.ISO7816 {
      */
     public static final byte INS_ICS_GET_VERSION = (byte) 0x50;
     public static final byte INS_ICS_PING = (byte) 0x51;
-    public static final byte INS_ICS_TEST_CBOR = (byte) 0x91;
+    public static final byte INS_ICS_TEST_CBOR = (byte) 0x52;
 
     /**
      * Credential provisioning instructions
