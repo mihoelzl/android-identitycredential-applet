@@ -57,9 +57,40 @@ public class CryptoManager {
     public void createCredentialBlobAndWrap(byte[] outCredentialBlob, short outOffset) {
         //TODO: implement
     }
-
+    
     public void unwrapCredentialBlob(byte[] credentialBlob, short offset, short length) {
         //TODO: implement
     }
+    
+    public short createCredentialCertificate(byte[] outCertificateBuffer, short outOffset) {
+        return 0;
+    }
+    
+    public short encryptCredentialData(byte[] data, short offset, short length, byte[] outBuffer, short outOffset) {
+        //TODO: implement
+        return 0;
+    }
+    
+    public short decryptCredentialData(byte[] encryptedData, short offset, short length, byte[] outData, short outOffset) {
+        //TODO: implement
+        return 0;
+    }
 
+    public void createSigningKeyAndWrap(byte[] outSigningBlob, short outOffset) {
+        //TODO: implement
+    }
+    
+    public void unwrapSigningBlob(byte[] signingBlob, short offset, short length) {
+        //TODO: implement
+    }
+    
+    public short createSigningKeyCertificate(byte[] outCertificateBuffer, short outOffset) {
+        //TODO: implement
+        return 0;
+    }
+    
+    public short signData(byte[] data, short offset, short length, byte[] outSignature, short outOffset) {
+        //TODO: implement
+        return 0;
+    }
 }
