@@ -29,7 +29,7 @@ import javacardx.apdu.ExtendedLength;
  */
 public class ICStoreApplet extends Applet implements ExtendedLength {
 
-    public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x01 };
+    public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x02 };
 
     private APDUManager mAPDUManager;
 
@@ -79,7 +79,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
                 break;
 
             case ISO7816.INS_ICS_PERSONALIZE_ACCESS_CONTROL:
-                processEncryptEntries();
+                processPersonalizeAccessControl();
                 break;
             case ISO7816.INS_ICS_GET_ENTRY:
                 processGetEntry();
@@ -95,7 +95,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         mAPDUManager.sendAll();
     }
 
-    private void processEncryptEntries()
+    private void processPersonalizeAccessControl()
     //byte[] data, short dataOffset, short dataLength, byte[] outIVbuffer, byte outIVoffset, byte[] outTag, short outTagOffset, byte[] outBuffer, byte outBufferOffset) 
     {
 
@@ -120,18 +120,21 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         byte[] outBuffer = mAPDUManager.getSendBuffer();
         short outLength = 0;
         
-        mCBORparser.init(receiveBuffer, inOffset);
+        mCBORparser.init(receiveBuffer, inOffset, receivingLength);
+        byte negInt = 0;
         
         switch(mCBORparser.getMajorType()) {
-        case CBORDecoder.TYPE_UNSIGNED_INTEGER:
         case CBORDecoder.TYPE_NEGATIVE_INTEGER:
-            if(mCBORparser.getIntegerSize() == 1) {
-                outBuffer[0] = mCBORparser.readInt8();
+            negInt = 1; 
+        case CBORDecoder.TYPE_UNSIGNED_INTEGER:
+            byte intSize = mCBORparser.getIntegerSize();
+            if(intSize  == 1) {
+                outBuffer[0] = (byte) (mCBORparser.readInt8() + negInt);
                 outLength = 1;
-            } else if(mCBORparser.getIntegerSize() == 2) {
-                Util.setShort(outBuffer, (short) 0, mCBORparser.readInt16());
+            } else if(intSize == 2) {
+                Util.setShort(outBuffer, (short) 0, (short) (mCBORparser.readInt16() + negInt));
                 outLength = 2;
-//            } else if(CBORDecoder.getIntegerSize(receiveBuffer, inOffset) == 4) {
+//            } else if(intSize == 4) {
 //                JCint.setInt(outBuffer, (short) 0, CBORDecoder.readInt32(receiveBuffer, inOffset));
 //                outLength = 4;
             } 
@@ -139,7 +142,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             
         case CBORDecoder.TYPE_BYTE_STRING:
         case CBORDecoder.TYPE_TEXT_STRING:
-            outLength = 2;
+            outLength = mCBORparser.readByteArray(outBuffer, (short) 0);
             break;
         case CBORDecoder.TYPE_ARRAY:
             outLength = 2;
@@ -156,9 +159,6 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             
         }
         
-        if(le < outLength) {
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
-        }
         mAPDUManager.setOutgoingLength(outLength);
     }
 

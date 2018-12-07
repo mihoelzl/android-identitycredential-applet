@@ -81,7 +81,7 @@ public class CBORDecoder {
     private byte[] mBuffer;
     
     public CBORDecoder() {
-        mStatusWords = JCSystem.makeTransientShortArray((short) 1, JCSystem.CLEAR_ON_RESET);     
+        mStatusWords = JCSystem.makeTransientShortArray((short) 2, JCSystem.CLEAR_ON_RESET);     
     }
     
     /**
@@ -89,9 +89,10 @@ public class CBORDecoder {
      * @param buffer Buffer with CBOR content
      * @param offset Offset in buffer where content should be read/written
      */
-    public void init(byte[] buffer, short off) {
+    public void init(byte[] buffer, short off, short length) {
         mBuffer = buffer;
         mStatusWords[0] = off;
+        mStatusWords[1] = length;
     }
 
     /**
@@ -100,6 +101,7 @@ public class CBORDecoder {
     public void reset() {
         mBuffer = null;
         mStatusWords[0] = 0;
+        mStatusWords[1] = 0;
     }
 
     /**
@@ -117,7 +119,7 @@ public class CBORDecoder {
      * @return Size of the integer in bytes
      */
     public byte getIntegerSize() {         
-        byte eventlength = (byte) (mBuffer[mStatusWords[0]] & ADDINFO_MASK);
+        final byte eventlength = (byte) (mBuffer[mStatusWords[0]] & ADDINFO_MASK);
         if(eventlength <= ONE_BYTE) {
             return 1;
         } else if(eventlength == TWO_BYTES) {
@@ -131,6 +133,20 @@ public class CBORDecoder {
     }
 
     /**
+     * Returns the current offset within the buffer stream.
+     */
+    public short getCurrentOffset() {
+        return mStatusWords[0];
+    }
+
+    /**
+     * Returns the length of the current buffer stream.
+     */
+    public short getBufferLength() {
+        return mStatusWords[1];
+    }
+    
+    /**
      * Returns the current offset in the buffer stream and increases the offset by
      * the given number
      * 
@@ -138,7 +154,7 @@ public class CBORDecoder {
      * @return Current offset value (before increase)
      */
     private short getOffsetAndIncrease(short inc) {
-        short off = mStatusWords[0];
+        final short off = mStatusWords[0];
         mStatusWords[0]+=inc;
         return off;
     }
@@ -152,12 +168,14 @@ public class CBORDecoder {
     }
 
     /**
-     * Read the 8bit integer at the current location (offset will be increased)
+     * Read the 8bit integer at the current location (offset will be increased).
+     * Note: this function works for positive and negative integers. Sign
+     * interpretation needs to be done by the caller.
      * 
      * @return The current 8bit Integer
      */
     public byte readInt8() {
-        byte eventlength = (byte) (readRawByte() & ADDINFO_MASK);
+        final byte eventlength = (byte) (readRawByte() & ADDINFO_MASK);
         if(eventlength < ONE_BYTE) {
             return eventlength;  
         } else if(eventlength == ONE_BYTE) {
@@ -171,11 +189,13 @@ public class CBORDecoder {
 
     /**
      * Read the 16bit integer at the current location (offset will be increased)
+     * Note: this function works for positive and negative integers. Sign
+     * interpretation needs to be done by the caller.
      * 
      * @return The current 16bit Integer
      */
     public short readInt16() {
-        byte addInfo = (byte) (readRawByte() & ADDINFO_MASK);
+        final byte addInfo = (byte) (readRawByte() & ADDINFO_MASK);
         if(addInfo == TWO_BYTES) {
             return Util.getShort(mBuffer, getOffsetAndIncrease((short) 2));  
         } else { 
@@ -192,8 +212,28 @@ public class CBORDecoder {
 //        return -1;
 //    }
     
-    public short readValueAsArray(byte[] outBuffer, short outOffset) {
+    /**
+     * Read the byte array at the current location and copy it into the given buffer.
+     * @param outBuffer Buffer where the array should be copied to
+     * @param outOffset Offset location within the buffer 
+     * @return Number of bytes copied into the buffer
+     */
+    public short readByteArray(byte[] outBuffer, short outOffset) {
+        final byte size = getIntegerSize(); // Read length information
+        short length = 0;
+        if(size == 1) {
+            length = readInt8();
+        } else if(size == 2) {
+            length = readInt16();
+        } else { // length information above 4 bytes not supported
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
 
-        return 0;
+        if(length > (short) outBuffer.length || (short)(length + getCurrentOffset()) > getBufferLength())
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        
+        length = Util.arrayCopyNonAtomic(mBuffer, getCurrentOffset(), outBuffer, outOffset, length);
+        
+        return length;
     }
 }

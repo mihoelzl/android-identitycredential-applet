@@ -2,7 +2,7 @@
 /mode trace=on
 /atr
 
-/select F0|mDL-ICApplet
+/select F0|ICApplet
 
 
 /send 8050000000
