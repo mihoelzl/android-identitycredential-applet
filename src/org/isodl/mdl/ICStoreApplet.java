@@ -35,10 +35,14 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
     private CryptoManager mCryptoManager;
     
+    private CBORDecoder mCBORparser;
+    
     private ICStoreApplet() {
         mAPDUManager = new APDUManager();
-        
+
         mCryptoManager = new CryptoManager();
+        
+        mCBORparser = new CBORDecoder();
     }
     
 
@@ -49,6 +53,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     public void process(APDU apdu) {
         if (this.selectingApplet()) {
             mAPDUManager.reset();
+            mCryptoManager.reset();
             return;
         }
 
@@ -73,7 +78,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
                 processGetVersion();
                 break;
 
-            case ISO7816.INS_ICS_ENCRYPT_ENTRIES:
+            case ISO7816.INS_ICS_PERSONALIZE_ACCESS_CONTROL:
                 processEncryptEntries();
                 break;
             case ISO7816.INS_ICS_GET_ENTRY:
@@ -115,20 +120,23 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         byte[] outBuffer = mAPDUManager.getSendBuffer();
         short outLength = 0;
         
-        switch(CBORDecoder.readMajorType(receiveBuffer, inOffset)) {
+        mCBORparser.init(receiveBuffer, inOffset);
+        
+        switch(mCBORparser.getMajorType()) {
         case CBORDecoder.TYPE_UNSIGNED_INTEGER:
         case CBORDecoder.TYPE_NEGATIVE_INTEGER:
-            if(CBORDecoder.getIntegerSize(receiveBuffer, inOffset) == 1) {
-                outBuffer[0] = CBORDecoder.readInt8(receiveBuffer, inOffset);
+            if(mCBORparser.getIntegerSize() == 1) {
+                outBuffer[0] = mCBORparser.readInt8();
                 outLength = 1;
-            } else if(CBORDecoder.getIntegerSize(receiveBuffer, inOffset) == 2) {
-                Util.setShort(outBuffer, (short) 0, CBORDecoder.readInt16(receiveBuffer, inOffset));
+            } else if(mCBORparser.getIntegerSize() == 2) {
+                Util.setShort(outBuffer, (short) 0, mCBORparser.readInt16());
                 outLength = 2;
 //            } else if(CBORDecoder.getIntegerSize(receiveBuffer, inOffset) == 4) {
 //                JCint.setInt(outBuffer, (short) 0, CBORDecoder.readInt32(receiveBuffer, inOffset));
 //                outLength = 4;
             } 
             break;
+            
         case CBORDecoder.TYPE_BYTE_STRING:
         case CBORDecoder.TYPE_TEXT_STRING:
             outLength = 2;

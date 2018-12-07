@@ -19,13 +19,16 @@ package org.isodl.mdl;
 
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
+import javacard.framework.JCSystem;
 import javacard.framework.Util;
-import javacardx.framework.math.BigNumber;
-import javacardx.framework.util.intx.JCint;
 
 public class CBORDecoder {
 
+    // Mask for the major CBOR type
     private static final byte MAJOR_TYPE_MASK = (byte) 0xE0;
+
+    // Mask for additional information in the low-order 5 bits 
+    private static final byte ADDINFO_MASK = (byte) 0x1F;
     
     // Major type 0: an unsigned integer
     public static final byte TYPE_UNSIGNED_INTEGER = (byte) (0x00);
@@ -43,9 +46,6 @@ public class CBORDecoder {
     public static final byte TYPE_TAG = (byte) (0x06);
     // Major type 7: floating-point numbers
     public static final byte TYPE_FLOAT = (byte) (0x07);
-
-    // Mask for additional information in the low-order 5 bits 
-    private static final byte ADDINFO_MASK = (byte) 0x1F;
     
     /** 
      * Length information (Integer size, array length, etc.) in low-order 5 bits
@@ -76,41 +76,108 @@ public class CBORDecoder {
 
     public static final byte INVALID_INPUT = -1;
 
+    private short[] mStatusWords;
+    
+    private byte[] mBuffer;
+    
+    public CBORDecoder() {
+        mStatusWords = JCSystem.makeTransientShortArray((short) 1, JCSystem.CLEAR_ON_RESET);     
+    }
+    
     /**
-     * Returns the current major type
-     * 
-     * @return
+     * Initializes with a given array and the given offset.
+     * @param buffer Buffer with CBOR content
+     * @param offset Offset in buffer where content should be read/written
      */
-    public static byte readMajorType(byte[] cborInput, short offset) {
-        if ((short)cborInput.length <= offset) {
-            return INVALID_INPUT;
-        }
-        return (byte) ((cborInput[offset] & MAJOR_TYPE_MASK) >> 5);
+    public void init(byte[] buffer, short off) {
+        mBuffer = buffer;
+        mStatusWords[0] = off;
     }
 
-    public static byte readInt8(byte[] cborInput, short offset) {
-        if ((short)cborInput.length <= offset) {
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+    /**
+     * Reset the internal state of the parser 
+     */
+    public void reset() {
+        mBuffer = null;
+        mStatusWords[0] = 0;
+    }
+
+    /**
+     * Return the current major type (does not increase buffer location)
+     * 
+     * @return Major type at the current buffer location
+     */
+    public byte getMajorType() {
+        return (byte) ((mBuffer[mStatusWords[0]] & MAJOR_TYPE_MASK) >> 5);
+    }
+
+    /**
+     * Returns the size of the integer at the current location
+     * 
+     * @return Size of the integer in bytes
+     */
+    public byte getIntegerSize() {         
+        byte eventlength = (byte) (mBuffer[mStatusWords[0]] & ADDINFO_MASK);
+        if(eventlength <= ONE_BYTE) {
+            return 1;
+        } else if(eventlength == TWO_BYTES) {
+            return 2;
+        } else if(eventlength == FOUR_BYTES) {
+            return 4;
+        } else if(eventlength == EIGHT_BYTES) {
+            return 8;
         }
-        byte eventlength = (byte) (cborInput[offset] & ADDINFO_MASK);
+        return INVALID_INPUT;
+    }
+
+    /**
+     * Returns the current offset in the buffer stream and increases the offset by
+     * the given number
+     * 
+     * @param inc Value to add to the offset
+     * @return Current offset value (before increase)
+     */
+    private short getOffsetAndIncrease(short inc) {
+        short off = mStatusWords[0];
+        mStatusWords[0]+=inc;
+        return off;
+    }
+    
+    /**
+     * Read the raw byte at the current buffer location and increase the offset by one.
+     * @return Current raw byte
+     */
+    private byte readRawByte() {
+        return mBuffer[mStatusWords[0]++];
+    }
+
+    /**
+     * Read the 8bit integer at the current location (offset will be increased)
+     * 
+     * @return The current 8bit Integer
+     */
+    public byte readInt8() {
+        byte eventlength = (byte) (readRawByte() & ADDINFO_MASK);
         if(eventlength < ONE_BYTE) {
             return eventlength;  
         } else if(eventlength == ONE_BYTE) {
-            return (byte)(cborInput[(short)(offset+1)] & 0xff);              
+            return (byte)(readRawByte() & 0xff);              
         } else {
             ISOException.throwIt(ISO7816.SW_WRONG_DATA);
         }
         return 0;
     }
 
-    public static short readInt16(byte[] cborInput, short offset) {
-        if ((short)cborInput.length <= offset) {
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
-        }
-        
-        byte addInfo = (byte) (cborInput[offset] & ADDINFO_MASK);
+
+    /**
+     * Read the 16bit integer at the current location (offset will be increased)
+     * 
+     * @return The current 16bit Integer
+     */
+    public short readInt16() {
+        byte addInfo = (byte) (readRawByte() & ADDINFO_MASK);
         if(addInfo == TWO_BYTES) {
-            return Util.getShort(cborInput, (short) (offset+1));  
+            return Util.getShort(mBuffer, getOffsetAndIncrease((short) 2));  
         } else { 
             ISOException.throwIt(ISO7816.SW_WRONG_DATA);
         }
@@ -124,26 +191,8 @@ public class CBORDecoder {
 //        } 
 //        return -1;
 //    }
-
-    public static byte getIntegerSize(byte[] cborInput, short offset) {
-        if ((short)cborInput.length <= offset) {
-            return INVALID_INPUT;
-        }
-         
-        byte eventlength = (byte) (cborInput[offset] & ADDINFO_MASK);
-        if(eventlength <= ONE_BYTE) {
-            return 1;
-        } else if(eventlength == TWO_BYTES) {
-            return 2;
-        } else if(eventlength == FOUR_BYTES) {
-            return 4;
-        } else if(eventlength == EIGHT_BYTES) {
-            return 8;
-        }
-        return INVALID_INPUT;
-    }
     
-    public static short getCurrentValueAsArray(byte[] cborInput, short offset, byte[] outBuffer, short outOffset) {
+    public short readValueAsArray(byte[] outBuffer, short outOffset) {
 
         return 0;
     }

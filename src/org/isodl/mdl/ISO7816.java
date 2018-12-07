@@ -19,28 +19,21 @@ package org.isodl.mdl;
 
 public interface ISO7816 extends javacard.framework.ISO7816 {
     /**
-     * Standard ISO7816 instructions
-     */
-    public static final byte INS_READ_BINARY = (byte) 0xB0;
-    public static final byte INS_READ_BINARY_EXT = (byte) 0xB1;
-
-    public static final byte INS_GET_DATA = (byte) 0xCA;
-    public static final byte INS_GET_DATA_EXT = (byte) 0xCB;
-
-    /**
      * Instructions for the Identity Credential Store
      */
     public static final byte INS_ICS_GET_VERSION = (byte) 0x50;
     public static final byte INS_ICS_PING = (byte) 0x51;
-    public static final byte INS_ICS_TEST_CBOR = (byte) 0x52;
+    public static final byte INS_ICS_GENERATE_SIGNING_KEY = (byte) 0x52;
+    public static final byte INS_ICS_TEST_CBOR = (byte) 0x53;
 
     /**
      * Credential provisioning instructions
      */
     public static final byte INS_ICS_CREATE_CREDENTIAL = (short) 0x10;
     public static final byte INS_ICS_GET_ATTESTATION_CERT = (short) 0x11;
-    public static final byte INS_ICS_PERSONALIZE_CREDENTIAL = (short) 0x12;
-    public static final byte INS_ICS_ENCRYPT_ENTRIES = (short) 0x41;
+    public static final byte INS_ICS_PERSONALIZE_ACCESS_CONTROL = (short) 0x12;
+    public static final byte INS_ICS_PERSONALIZE_ATTRIBUTE = (short) 0x13;
+    public static final byte INS_ICS_SIGN_PERSONALIZED_DATA = (short) 0x14;
 
     /**
      * Credential Management instructions
@@ -51,14 +44,4 @@ public interface ISO7816 extends javacard.framework.ISO7816 {
     public static final byte INS_ICS_GET_ENTRY = (short) 0x3A;
     public static final byte INS_ICS_CREATE_SIGNATURE = (short) 0x3B;
     public static final byte INS_ICS_GENERATE_NEW_SIGNING_KEY= (short) 0x40;
-    
-    /**
-     * Status words
-     */
-    public static final short SW_OK = (short) 0x9000;
-    public static final short SW_REFERENCE_DATA_NOT_FOUND = (short) 0x6A88;
-    public static final short SW_INTERNAL_ERROR = (short) 0x6d66;
-    public static final short SW_SM_DO_MISSING = (short) 0x6987;
-    public static final short SW_SM_DO_INCORRECT = (short) 0x6988;
-    public static final short SW_NOT_ENOUGH_MEMORY = (short) 0x6A84;
 }

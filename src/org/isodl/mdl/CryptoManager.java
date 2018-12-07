@@ -53,6 +53,10 @@ public class CryptoManager {
         mHBK.setKey(mTempBuffer, (short)0);
     }
 
+    public void reset() {
+        // TODO Auto-generated method stub
+        
+    }
 
     public void createCredentialBlobAndWrap(byte[] outCredentialBlob, short outOffset) {
         //TODO: implement
@@ -93,4 +97,6 @@ public class CryptoManager {
         //TODO: implement
         return 0;
     }
+
+
 }
