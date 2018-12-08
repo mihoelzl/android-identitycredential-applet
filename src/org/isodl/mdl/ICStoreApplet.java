@@ -35,14 +35,18 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
     private CryptoManager mCryptoManager;
     
-    private CBORDecoder mCBORparser;
+    private CBORDecoder mCBORDecoder;
+
+    private CBOREncoder mCBOREncoder;
     
     private ICStoreApplet() {
+        mCBORDecoder = new CBORDecoder();
+        
+        mCBOREncoder = new CBOREncoder();
+        
         mAPDUManager = new APDUManager();
 
-        mCryptoManager = new CryptoManager();
-        
-        mCBORparser = new CBORDecoder();
+        mCryptoManager = new CryptoManager(mAPDUManager, mCBORDecoder, mCBOREncoder);
     }
     
 
@@ -76,6 +80,11 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             switch (buf[ISO7816.OFFSET_INS]) {
             case ISO7816.INS_ICS_GET_VERSION:
                 processGetVersion();
+                break;
+            case ISO7816.INS_ICS_CREATE_CREDENTIAL:
+            case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
+            case ISO7816.INS_ICS_CREATE_EPHEMERAL_KEY:
+                mCryptoManager.process();
                 break;
 
             case ISO7816.INS_ICS_PERSONALIZE_ACCESS_CONTROL:
@@ -119,20 +128,22 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         short le = mAPDUManager.setOutgoing();
         byte[] outBuffer = mAPDUManager.getSendBuffer();
         short outLength = 0;
+
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
+        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
         
-        mCBORparser.init(receiveBuffer, inOffset, receivingLength);
         byte negInt = 0;
         
-        switch(mCBORparser.getMajorType()) {
+        switch(mCBORDecoder.getMajorType()) {
         case CBORDecoder.TYPE_NEGATIVE_INTEGER:
             negInt = 1; 
         case CBORDecoder.TYPE_UNSIGNED_INTEGER:
-            byte intSize = mCBORparser.getIntegerSize();
+            byte intSize = mCBORDecoder.getIntegerSize();
             if(intSize  == 1) {
-                outBuffer[0] = (byte) (mCBORparser.readInt8() + negInt);
+                outBuffer[0] = (byte) (mCBORDecoder.readInt8() + negInt);
                 outLength = 1;
             } else if(intSize == 2) {
-                Util.setShort(outBuffer, (short) 0, (short) (mCBORparser.readInt16() + negInt));
+                Util.setShort(outBuffer, (short) 0, (short) (mCBORDecoder.readInt16() + negInt));
                 outLength = 2;
 //            } else if(intSize == 4) {
 //                JCint.setInt(outBuffer, (short) 0, CBORDecoder.readInt32(receiveBuffer, inOffset));
@@ -142,7 +153,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             
         case CBORDecoder.TYPE_BYTE_STRING:
         case CBORDecoder.TYPE_TEXT_STRING:
-            outLength = mCBORparser.readByteArray(outBuffer, (short) 0);
+            outLength = mCBORDecoder.readByteString(outBuffer, (short) 0);
             break;
         case CBORDecoder.TYPE_ARRAY:
             outLength = 2;

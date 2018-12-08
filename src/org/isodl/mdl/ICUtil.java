@@ -47,4 +47,12 @@ public class ICUtil {
         byte bitMask = (byte) ((byte) 1 << (short) (flag & (short) 0x0007));
         return bitMask == (byte) (bitField[byteIndex] & bitMask);
     }
+
+    /**
+     * Compare two signed shorts as unsigned value. Returns true if n1 is truly
+     * smaller, false otherwise.
+     */
+    public static boolean isLessThanAsUnsignedShort(short n1, short n2) {
+        return (n1 < n2) ^ ((n1 < 0) != (n2 < 0));
+    }
 }

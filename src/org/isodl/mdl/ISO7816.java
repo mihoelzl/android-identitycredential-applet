@@ -23,7 +23,7 @@ public interface ISO7816 extends javacard.framework.ISO7816 {
      */
     public static final byte INS_ICS_GET_VERSION = (byte) 0x50;
     public static final byte INS_ICS_PING = (byte) 0x51;
-    public static final byte INS_ICS_GENERATE_SIGNING_KEY = (byte) 0x52;
+    public static final byte INS_ICS_CREATE_EPHEMERAL_KEY = (byte) 0x52;
     public static final byte INS_ICS_TEST_CBOR = (byte) 0x53;
 
     /**
@@ -43,5 +43,5 @@ public interface ISO7816 extends javacard.framework.ISO7816 {
     public static final byte INS_ICS_LOAD_ACCESS_CONTROL_PROFILE = (short) 0x32;
     public static final byte INS_ICS_GET_ENTRY = (short) 0x3A;
     public static final byte INS_ICS_CREATE_SIGNATURE = (short) 0x3B;
-    public static final byte INS_ICS_GENERATE_NEW_SIGNING_KEY= (short) 0x40;
+    public static final byte INS_ICS_CREATE_SIGNING_KEY= (short) 0x40;
 }
