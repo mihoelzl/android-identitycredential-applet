@@ -20,6 +20,7 @@ package org.isodl.mdl;
 import javacard.framework.APDU;
 import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
+import javacard.framework.Util;
 
 public class APDUManager {
 
@@ -37,8 +38,8 @@ public class APDUManager {
     private static final short FLAG_APDU_RECEIVED = 1;
     private static final short STATUS_FLAGS_SIZE = 1;
 
-    private byte[] mSendingBuffer;
-    private byte[] mAPDUBuffer;
+    private byte[] mSendBuffer;
+    private byte[] mReceiveBuffer;
     private short[] mStatusValues;
 
     public APDUManager() {
@@ -51,11 +52,12 @@ public class APDUManager {
     }
 
     public boolean process(APDU apdu) {
-        // TODO should we handle APDU chaining here?
+        if (mSendBuffer == null) {
+            mSendBuffer = JCSystem.makeTransientByteArray(MINIMUM_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
+        }
         
-        mAPDUBuffer= apdu.getBuffer();
-        if (mSendingBuffer == null) {
-            mSendingBuffer = JCSystem.makeTransientByteArray(MINIMUM_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
+        if (mReceiveBuffer == null) {
+            mReceiveBuffer = JCSystem.makeTransientByteArray(MINIMUM_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
         }
         
         mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH] = 0;
@@ -86,11 +88,11 @@ public class APDUManager {
     }
 
     public byte[] getSendBuffer() {
-        return mSendingBuffer;
+        return mSendBuffer;
     }
 
     public byte[] getReceiveBuffer() {
-        return mAPDUBuffer;
+        return mReceiveBuffer;
     }
 
     public short getOffsetIncomingData() {
@@ -113,10 +115,16 @@ public class APDUManager {
             
             short bytesReceived = apdu.setIncomingAndReceive();
             final short lc = apdu.getIncomingLength();
+            final short receiveOffset = apdu.getOffsetCdata();
+    
+            byte[] receiveBuffer = getReceiveBuffer();
+            final byte[] apduBuffer = apdu.getBuffer();
 
             if (bytesReceived != lc) {
                 ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
             }
+            
+            Util.arrayCopyNonAtomic(apduBuffer, receiveOffset, receiveBuffer, (short)0, bytesReceived);
             
             mStatusValues[VALUE_INCOMING_LENGTH] = lc;
             mStatusValues[VALUE_INCOMING_DATA_OFFSET] = (short)0;
@@ -145,7 +153,7 @@ public class APDUManager {
             final short outLength = mStatusValues[VALUE_OUTGOING_LENGTH];
             apdu.setOutgoingLength(outLength);
 
-            apdu.sendBytesLong(mSendingBuffer, (short) 0, outLength);
+            apdu.sendBytesLong(mSendBuffer, (short) 0, outLength);
         }
     }
 }

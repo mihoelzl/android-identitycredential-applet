@@ -55,6 +55,8 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     }
 
     public void process(APDU apdu) {
+        byte[] buf = apdu.getBuffer();
+        
         if (this.selectingApplet()) {
             mAPDUManager.reset();
             mCryptoManager.reset();
@@ -64,8 +66,6 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         if (!mAPDUManager.process(apdu)) {
             return;
         }
-
-        byte[] buf = apdu.getBuffer();
 
         if (apdu.isISOInterindustryCLA()) {
             switch (buf[ISO7816.OFFSET_INS]) {
