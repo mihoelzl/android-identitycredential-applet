@@ -17,6 +17,8 @@
 
 package org.isodl.mdl;
 
+import javacard.framework.ISO7816;
+import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 
 public class CBORBase {
@@ -134,6 +136,9 @@ public class CBORBase {
      * @param inc Value that should be added to the offset
      */
     final protected void increaseOffset(short inc) {
+        if((short)(getCurrentOffset() + inc) > getBufferLength())
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        
         mStatusWords[0]+=inc;        
     }
 }

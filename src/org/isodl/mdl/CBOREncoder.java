@@ -27,16 +27,24 @@ public class CBOREncoder extends CBORBase{
     /**
      * Start a new array at the current buffer location with the given array size.
      */
-    public void encodeArrayStart(short arraySize) {
-        encodeValue((byte) (TYPE_ARRAY << 5), arraySize);
+    public short encodeArrayStart(short arraySize) {
+        return encodeValue((byte) (TYPE_ARRAY << 5), arraySize);
     }
     
     /**
      * Encodes the byte string at the current buffer location.
      */
-    public void encodeByteString(byte[] byteString, short offset, short length) {
+    public short encodeByteString(byte[] byteString, short offset, short length) {
         encodeValue((byte) (TYPE_BYTE_STRING << 5), length);
-        writeRawByteArray(byteString, offset, length);
+        return writeRawByteArray(byteString, offset, length);
+    }
+    
+    /**
+     * Encodes the text string at the current buffer location.
+     */
+    public short encodeTextString(byte[] byteString, short offset, short length) {
+        encodeValue((byte) (TYPE_TEXT_STRING << 5), length);
+        return writeRawByteArray(byteString, offset, length);
     }
     
     /**
@@ -46,8 +54,8 @@ public class CBOREncoder extends CBORBase{
      *              unsigned shorts in Java card, a negative number will be
      *              interpreted as positive value.
      */
-    public void encodeUInt8(byte value) {
-        encodeValue(TYPE_UNSIGNED_INTEGER, (short) (value & 0xFF));
+    public short encodeUInt8(byte value) {
+        return encodeValue(TYPE_UNSIGNED_INTEGER, (short) (value & 0x00FF));
     }
 
     /**
@@ -57,62 +65,66 @@ public class CBOREncoder extends CBORBase{
      *              unsigned shorts in Java card, a negative number will be
      *              interpreted as positive value.
      */
-    public void encodeUInt16(short value) {
-        encodeValue(TYPE_UNSIGNED_INTEGER, value);
+    public short encodeUInt16(short value) {
+        return encodeValue(TYPE_UNSIGNED_INTEGER, value);
     }
     
     /**
      * Encodes the given byte array as 4 byte Integer
      */
-    public void encodeUInt32(byte[] valueBuf, short valueOffset) {           
+    public short encodeUInt32(byte[] valueBuf, short valueOffset) {           
         writeRawByte((byte) (TYPE_UNSIGNED_INTEGER | ENCODED_FOUR_BYTES));            
-        writeRawByteArray(valueBuf, valueOffset, (short) 4); 
+        return (short) (writeRawByteArray(valueBuf, valueOffset, (short) 4)); 
     }
 
     /**
      * Encodes the given byte array as 8 byte Integer
      */
-    public void encodeUInt64(byte[] valueBuf, short valueOffset) {           
+    public short encodeUInt64(byte[] valueBuf, short valueOffset) {           
         writeRawByte((byte) (TYPE_UNSIGNED_INTEGER | ENCODED_EIGHT_BYTES));            
-        writeRawByteArray(valueBuf, valueOffset, (short) 8); 
+        return (short) (writeRawByteArray(valueBuf, valueOffset, (short) 8)); 
     }
     
-    private void encodeValue(byte majorType, short value) {      
+    private short encodeValue(byte majorType, short value) {      
         if(ICUtil.isLessThanAsUnsignedShort(value, ENCODED_ONE_BYTE)) {
-            writeRawByte((byte) (majorType | value));  
+            return writeRawByte((byte) (majorType | value));  
         } else if (ICUtil.isLessThanAsUnsignedShort(value, (short) 0x100)) {
-            writeUInt8(majorType, (byte) value);
+            return writeUInt8(majorType, (byte) value);
         } else {
-            writeUInt16(majorType, value);
+            return writeUInt16(majorType, value);
         }        
     }
     
     
-    private void writeUInt8(byte type, byte value) {   
+    private short writeUInt8(byte type, byte value) {   
         writeRawByte((byte) (type | ENCODED_ONE_BYTE));     
         writeRawByte(value);  
+        return 2;
     }
     
-    private void writeUInt16(byte type, short value) {           
+    private short  writeUInt16(byte type, short value) {           
         writeRawByte((byte) (type | ENCODED_TWO_BYTES));            
         writeRawShort(value); 
+        return 3;
     }
 
     /**
      * Write the given byte at the current buffer location and increase the offset
      * by one.
      */
-    final protected void writeRawByte(byte val) {
+    final protected short writeRawByte(byte val) {
         mBuffer[mStatusWords[0]++] = val;
+        return 1;
     }
     
     /**
      * Write the given short value at the current buffer location and increase the
      * offset by two.
      */
-    final protected void writeRawShort(short val) {
+    final protected short writeRawShort(short val) {
         Util.setShort(mBuffer, mStatusWords[0], val);
         mStatusWords[0]+=2;
+        return 2;
     }
     
 
@@ -121,10 +133,10 @@ public class CBOREncoder extends CBORBase{
      * by its size.
      */
     final protected short writeRawByteArray(byte[] value, short offset, short length) {
-        if(length > (short) (value.length + offset)|| (short)(length + getCurrentOffset()) > getBufferLength())
+        if(length > (short) (value.length + offset) || (short)(length + getCurrentOffset()) > getBufferLength())
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         
-        length = Util.arrayCopy(value, offset, mBuffer, getCurrentOffset(), length);
+        length = Util.arrayCopyNonAtomic(value, offset, mBuffer, getCurrentOffset(), length);
         
         increaseOffset(length);
         
