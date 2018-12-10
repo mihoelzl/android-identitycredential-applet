@@ -52,6 +52,8 @@ public class APDUManager {
     }
 
     public boolean process(APDU apdu) {
+        byte[] buf = apdu.getBuffer();
+        
         if (mSendBuffer == null) {
             mSendBuffer = JCSystem.makeTransientByteArray(MINIMUM_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
         }
@@ -68,6 +70,8 @@ public class APDUManager {
         ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING, false);
         ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED, false);
 
+        Util.arrayCopyNonAtomic(buf, ISO7816.OFFSET_CLA, mReceiveBuffer, ISO7816.OFFSET_CLA, (short)(ISO7816.OFFSET_EXT_CDATA - ISO7816.OFFSET_CLA));
+        
         // TODO: check if there are other cases where selection is not allowed.
         // If there are, this method returns false
 

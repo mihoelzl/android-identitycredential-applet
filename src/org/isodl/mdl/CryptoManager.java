@@ -17,6 +17,7 @@
 
 package org.isodl.mdl;
 
+import javacard.framework.APDU;
 import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
@@ -48,7 +49,7 @@ public class CryptoManager {
     private CBOREncoder mCBOREncoder;
     
     public CryptoManager(APDUManager apduManager, CBORDecoder decoder, CBOREncoder encoder) {
-        mTempBuffer = JCSystem.makeTransientByteArray((short)64, JCSystem.CLEAR_ON_DESELECT);
+        mTempBuffer = JCSystem.makeTransientByteArray((short)65, JCSystem.CLEAR_ON_DESELECT);
         mRandom = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
         mRandom.generateData(mTempBuffer, (short)0, (short)32);
         
@@ -90,21 +91,28 @@ public class CryptoManager {
 
     private void processCreateEphemeralKey() {
         byte[] buf = mAPDUManager.getReceiveBuffer();
-        
+
+                
         switch (Util.getShort(buf, ISO7816.OFFSET_P1)) {
         case 0: // Do nothing
+            break;
         case 1: // EC_NIST_P_256
+            mAPDUManager.setOutgoing();
+            mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
+            
             mECKeyPair.genKeyPair();
             
             mCBOREncoder.encodeArrayStart((short) 2);
             short length = ((ECPublicKey)mECKeyPair.getPublic()).getW(mTempBuffer, (short)0);
-            mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
+            short outLength = mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
             
             length = ((ECPrivateKey)mECKeyPair.getPrivate()).getS(mTempBuffer, (short)0);
-            mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
-        default: 
-            ISOException.throwIt(ISO7816.SW_WRONG_P1P2);
+            outLength += mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
             
+            mAPDUManager.setOutgoingLength(outLength);
+            break;
+        default: 
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
     }
 
