@@ -24,8 +24,7 @@ import javacard.framework.Util;
 
 public class APDUManager {
 
-    private static final short MINIMUM_BUFFER_SIZE = 261;
-    private static final short MAXIMUM_BUFFER_SIZE = 0x7FFF;
+    private static final short BUFFER_SIZE = 261;
 
     private static final short VALUE_OUTGOING_EXPECTED_LENGTH = 0;
     private static final short VALUE_OUTGOING_LENGTH = 1;
@@ -48,20 +47,6 @@ public class APDUManager {
     }
 
     public void reset() {
-        // TODO
-    }
-
-    public boolean process(APDU apdu) {
-        byte[] buf = apdu.getBuffer();
-        
-        if (mSendBuffer == null) {
-            mSendBuffer = JCSystem.makeTransientByteArray(MINIMUM_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
-        }
-        
-        if (mReceiveBuffer == null) {
-            mReceiveBuffer = JCSystem.makeTransientByteArray(MINIMUM_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
-        }
-        
         mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH] = 0;
         mStatusValues[VALUE_OUTGOING_LENGTH] = 0;
         mStatusValues[VALUE_INCOMING_LENGTH] = 0;
@@ -69,7 +54,21 @@ public class APDUManager {
 
         ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING, false);
         ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED, false);
+    }
 
+    public boolean process(APDU apdu) {
+        byte[] buf = apdu.getBuffer();
+        
+        if (mSendBuffer == null) {
+            mSendBuffer = JCSystem.makeTransientByteArray(BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
+        }
+        
+        if (mReceiveBuffer == null) {
+            mReceiveBuffer = JCSystem.makeTransientByteArray(BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
+        }
+        
+        reset();
+        
         Util.arrayCopyNonAtomic(buf, ISO7816.OFFSET_CLA, mReceiveBuffer, ISO7816.OFFSET_CLA, (short)(ISO7816.OFFSET_EXT_CDATA - ISO7816.OFFSET_CLA));
         
         // TODO: check if there are other cases where selection is not allowed.
@@ -108,7 +107,7 @@ public class APDUManager {
     }
 
     public short getOutbufferLength() {
-        return MINIMUM_BUFFER_SIZE;
+        return BUFFER_SIZE;
     }
     
     public short receiveAll() throws ISOException {

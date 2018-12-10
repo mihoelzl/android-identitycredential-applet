@@ -30,13 +30,39 @@ public class CBOREncoder extends CBORBase{
     public void encodeArrayStart(short arraySize) {
         encodeValue((byte) (TYPE_ARRAY << 5), arraySize);
     }
+
+    /**
+     * Start a new map at the current buffer location with the given map size.
+     */
+    public void encodeMapStart(short mapSize) {
+        encodeValue((byte) (TYPE_MAP << 5), mapSize);
+    }
     
     /**
-     * Encodes the byte string at the current buffer location.
+     * Encodes a byte string with the given length at the current buffer location.
+     * The actual byte string is not copied into the buffer. Returns the offset in
+     * the buffer where the byte string is supposed to be copied into. The offset
+     * will afterwards be increased by the given length
      */
-    public void encodeByteString(byte[] byteString, short offset, short length) {
+    public short encodeByteString(short length) {
         encodeValue((byte) (TYPE_BYTE_STRING << 5), length);
-        writeRawByteArray(byteString, offset, length);
+        return getCurrentOffsetAndIncrease(length);
+    }
+
+    /**
+     * Encodes the given byte string at the current buffer location.
+     */
+    public short encodeByteString(byte[] byteString, short offset, short length) {
+        encodeValue((byte) (TYPE_BYTE_STRING << 5), length);
+        return writeRawByteArray(byteString, offset, length);
+    }
+    
+    /**
+     * Encodes the given byte string at the current buffer location.
+     */
+    public short encodeTextString(byte[] byteString, short offset, short length) {
+        encodeValue((byte) (TYPE_TEXT_STRING << 5), length);
+        return writeRawByteArray(byteString, offset, length);
     }
     
     /**
@@ -124,7 +150,7 @@ public class CBOREncoder extends CBORBase{
         if(length > (short) (value.length + offset)|| (short)(length + getCurrentOffset()) > getBufferLength())
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         
-        length = Util.arrayCopy(value, offset, mBuffer, getCurrentOffset(), length);
+        Util.arrayCopyNonAtomic(value, offset, mBuffer, getCurrentOffset(), length);
         
         increaseOffset(length);
         
