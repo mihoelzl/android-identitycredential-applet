@@ -167,9 +167,8 @@ public class CryptoManager {
 
             // Start the CBOR encoding of the output 
             mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
-            mCBOREncoder.encodeArrayStart((short) 2);
+            short outLength = mCBOREncoder.startArray((short) 2);
             
-            short outLength  = 2; //TODO: make it dynamic
             outLength += mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
             
             // Get the private key and append it to the output
@@ -206,10 +205,12 @@ public class CryptoManager {
         
         // Start encoding the output: credentialBlob = { "credentialData" : bstr }
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
-        mCBOREncoder.encodeMapStart((short) 1);
+        mCBOREncoder.startMap((short) 1);
         mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_CREDENTIALDATA, (short)0, (short) ICConstants.CBOR_MAPKEY_CREDENTIALDATA.length); 
-        
-        short outOffset = mCBOREncoder.encodeByteString((short) (AES_GCM_IV_SIZE + (short) 5 + AES_GCM_KEY_SIZE + EC_KEY_SIZE + AES_GCM_TAG_SIZE)); 
+
+        short outOffset = mCBOREncoder.startByteString((short) (5 // CBOR structure with 5 bytes = 1 array start + 2 STK bstr + 2 CRK bstr   
+                + AES_GCM_IV_SIZE
+                + AES_GCM_KEY_SIZE + EC_KEY_SIZE + AES_GCM_TAG_SIZE));
 
         // Generate the AES-256 storage key 
         mRandomData.generateData(mTempBuffer, (short) 0, AES_GCM_KEY_SIZE);
@@ -221,41 +222,42 @@ public class CryptoManager {
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, true);
         
         // encrypt storage key and credential key for returning
-        short outLength = wrapCredentialBlob(encryptionKey, outBuffer, outOffset);
+        outOffset += wrapCredentialBlob(encryptionKey, outBuffer, outOffset);
         
         // Initialize the signature creation object
         mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
         
-        // TODO: add CBOR structure
+        // TODO: add CBOR structure for signature
         // Add credential type to the signature
         mECSignature.update(receiveBuffer, inOffset, receivingLength);
         
-        mAPDUManager.setOutgoingLength(outLength);
+        mAPDUManager.setOutgoingLength(outOffset);
     }
     
     private short wrapCredentialBlob(AESKey encryptionKey, byte[] outCredentialBlob, short outOffset) {
         // Encoder for the CredentialKeys blob
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
         // Encode an array consisting of [storageKey, credentialPrivKey]
-        mCBOREncoder.encodeArrayStart((short) 2);  
+        mCBOREncoder.startArray((short) 2);  
         
         // Copy the credential storage key into the temp buffer
-        mCredentialStorageKey.getKey(mTempBuffer, mCBOREncoder.encodeByteString(AES_GCM_KEY_SIZE));
+        mCredentialStorageKey.getKey(mTempBuffer, mCBOREncoder.startByteString(AES_GCM_KEY_SIZE));
         
         // Copy the credential private key in the tempBuffer
-        ((ECPrivateKey) mCredentialECKeyPair.getPrivate()).getS(mTempBuffer, mCBOREncoder.encodeByteString(EC_KEY_SIZE));
+        ((ECPrivateKey) mCredentialECKeyPair.getPrivate()).getS(mTempBuffer, mCBOREncoder.startByteString(EC_KEY_SIZE));
 
-        short dataLength = (short) (mCBOREncoder.getCurrentOffset() - 1);
+        short dataLength = mCBOREncoder.getCurrentOffset();
         // Generate the IV
         mRandomData.generateData(outCredentialBlob, (short) outOffset, (short) AES_GCM_IV_SIZE);
         
         // Encrypt and return the size of the result (credentialBlob)
-        return CryptoBaseX.doFinal(encryptionKey, CryptoBaseX.ALG_AES_GCM, Cipher.MODE_ENCRYPT, 
-                mTempBuffer, (short) 0, dataLength, // Data 
+        return (short) (CryptoBaseX.doFinal(encryptionKey, CryptoBaseX.ALG_AES_GCM, // Key information
+                Cipher.MODE_ENCRYPT, mTempBuffer, (short) 0, dataLength, // Data
                 outCredentialBlob, outOffset, AES_GCM_IV_SIZE, // IV
                 mTempBuffer, (short) 0, (short) 0, // authData empty
-                outCredentialBlob, (short)(outOffset + AES_GCM_IV_SIZE), 
-                outCredentialBlob, (short)(outOffset + AES_GCM_IV_SIZE + dataLength), CryptoBaseX.AES_GCM_TAGLEN_128); // Output
+                outCredentialBlob, (short) (outOffset + AES_GCM_IV_SIZE), // Output location
+                outCredentialBlob, (short) (outOffset + AES_GCM_IV_SIZE + dataLength), // Tag output
+                CryptoBaseX.AES_GCM_TAGLEN_128) + AES_GCM_IV_SIZE + CryptoBaseX.AES_GCM_TAGLEN_128); 
     }
     
     public void unwrapCredentialBlob(byte[] credentialBlob, short offset, short length) {

@@ -1,0 +1,4 @@
+testCBORByteArray
+testCBORInteger
+testCreateEphemeralKey
+testCreateCredential

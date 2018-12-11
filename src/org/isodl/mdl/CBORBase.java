@@ -131,14 +131,16 @@ public class CBORBase {
     }
 
     /**
-     * Increase the current offset.
+     * Increase the current offset and return the new value.
      * 
      * @param inc Value that should be added to the offset
+     * @return New offset value (after increase)
      */
-    final protected void increaseOffset(short inc) {
+    final protected short increaseOffset(short inc) {
         if((short)(getCurrentOffset() + inc) > getBufferLength())
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         
-        mStatusWords[0]+=inc;        
+        mStatusWords[0]+=inc;
+        return mStatusWords[0];
     }
 }

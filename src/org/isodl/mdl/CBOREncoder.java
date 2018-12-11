@@ -19,50 +19,66 @@ package org.isodl.mdl;
 
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
-import javacard.framework.JCSystem;
 import javacard.framework.Util;
 
 public class CBOREncoder extends CBORBase{
 
     /**
      * Start a new array at the current buffer location with the given array size.
+     * 
+     * @return The offset in the buffer where the first array entry is supposed to
+     *         be copied into.
      */
-    public short encodeArrayStart(short arraySize) {
-        return encodeValue((byte) (TYPE_ARRAY << 5), arraySize);
+    public short startArray(short arraySize) {
+        encodeValue((byte) (TYPE_ARRAY << 5), arraySize);
+        return getCurrentOffset();
     }
 
     /**
      * Start a new map at the current buffer location with the given map size.
+     * 
+     * @return The offset in the buffer where the first key is supposed to be copied
+     *         into.
      */
-    public void encodeMapStart(short mapSize) {
+    public short startMap(short mapSize) {
         encodeValue((byte) (TYPE_MAP << 5), mapSize);
+        return getCurrentOffset();
     }
-    
+
     /**
-     * Encodes a byte string with the given length at the current buffer location.
-     * The actual byte string is not copied into the buffer. Returns the offset in
-     * the buffer where the byte string is supposed to be copied into. The offset
-     * will afterwards be increased by the given length
+     * Encodes the start of a byte string with the given length at the current
+     * buffer location. The actual byte string is not copied into the buffer and the
+     * internal offset will already be increased by the given length (offset will be
+     * set to the location after the byte string)
+     * 
+     * @return The offset in the buffer where the byte string is supposed to be
+     *         copied into.
      */
-    public short encodeByteString(short length) {
+    public short startByteString(short length) {
         encodeValue((byte) (TYPE_BYTE_STRING << 5), length);
         return getCurrentOffsetAndIncrease(length);
     }
 
     /**
      * Encodes the given byte string at the current buffer location.
+     * 
+     * @return The number of bytes written to buffer
      */
     public short encodeByteString(byte[] byteString, short offset, short length) {
-        encodeValue((byte) (TYPE_BYTE_STRING << 5), length);
-        return writeRawByteArray(byteString, offset, length);
+        short len = encodeValue((byte) (TYPE_BYTE_STRING << 5), length);
+        len += writeRawByteArray(byteString, offset, length);
+        return len;
     }
-    
+
     /**
      * Encodes the text string at the current buffer location.
+     * 
+     * @return The number of bytes written to buffer
      */
     public short encodeTextString(byte[] byteString, short offset, short length) {
-        encodeValue((byte) (TYPE_TEXT_STRING << 5), length);
-        return writeRawByteArray(byteString, offset, length);
+        short len = encodeValue((byte) (TYPE_TEXT_STRING << 5), length);
+        len += writeRawByteArray(byteString, offset, length);
+        return len;
     }
     
     /**
@@ -71,6 +87,7 @@ public class CBOREncoder extends CBORBase{
      * @param value Value to encode in the byte array. Note: as there are no
      *              unsigned shorts in Java card, a negative number will be
      *              interpreted as positive value.
+     * @return The number of bytes written to buffer
      */
     public short encodeUInt8(byte value) {
         return encodeValue(TYPE_UNSIGNED_INTEGER, (short) (value & 0x00FF));
@@ -82,6 +99,7 @@ public class CBOREncoder extends CBORBase{
      * @param value Value to encode in the byte array. Note: as there are no
      *              unsigned shorts in Java card, a negative number will be
      *              interpreted as positive value.
+     * @return The number of bytes written to buffer
      */
     public short encodeUInt16(short value) {
         return encodeValue(TYPE_UNSIGNED_INTEGER, value);
@@ -89,21 +107,25 @@ public class CBOREncoder extends CBORBase{
     
     /**
      * Encodes the given byte array as 4 byte Integer
+     * 
+     * @return The number of bytes written to buffer
      */
     public short encodeUInt32(byte[] valueBuf, short valueOffset) {           
         writeRawByte((byte) (TYPE_UNSIGNED_INTEGER | ENCODED_FOUR_BYTES));            
-        return (short) (writeRawByteArray(valueBuf, valueOffset, (short) 4)); 
+        return (short) (writeRawByteArray(valueBuf, valueOffset, (short) 4) + 1); 
     }
 
     /**
      * Encodes the given byte array as 8 byte Integer
+     * 
+     * @return The number of bytes written to buffer
      */
     public short encodeUInt64(byte[] valueBuf, short valueOffset) {           
         writeRawByte((byte) (TYPE_UNSIGNED_INTEGER | ENCODED_EIGHT_BYTES));            
-        return (short) (writeRawByteArray(valueBuf, valueOffset, (short) 8)); 
+        return (short) (writeRawByteArray(valueBuf, valueOffset, (short) 8) + 1); 
     }
     
-    private short encodeValue(byte majorType, short value) {      
+    final private short encodeValue(byte majorType, short value) {      
         if(ICUtil.isLessThanAsUnsignedShort(value, ENCODED_ONE_BYTE)) {
             return writeRawByte((byte) (majorType | value));  
         } else if (ICUtil.isLessThanAsUnsignedShort(value, (short) 0x100)) {
@@ -113,16 +135,15 @@ public class CBOREncoder extends CBORBase{
         }        
     }
     
-    
-    private short writeUInt8(byte type, byte value) {   
-        writeRawByte((byte) (type | ENCODED_ONE_BYTE));     
-        writeRawByte(value);  
+    final private short writeUInt8(byte type, byte value) {
+        writeRawByte((byte) (type | ENCODED_ONE_BYTE));
+        writeRawByte(value);
         return 2;
     }
-    
-    private short  writeUInt16(byte type, short value) {           
-        writeRawByte((byte) (type | ENCODED_TWO_BYTES));            
-        writeRawShort(value); 
+
+    final private short writeUInt16(byte type, short value) {
+        writeRawByte((byte) (type | ENCODED_TWO_BYTES));
+        writeRawShort(value);
         return 3;
     }
 
@@ -130,8 +151,9 @@ public class CBOREncoder extends CBORBase{
      * Write the given byte at the current buffer location and increase the offset
      * by one.
      */
-    final protected short writeRawByte(byte val) {
-        mBuffer[mStatusWords[0]++] = val;
+    final private short writeRawByte(byte val) {
+        mBuffer[getCurrentOffset()] = val;
+        increaseOffset((short) 1);
         return 1;
     }
     
@@ -139,22 +161,27 @@ public class CBOREncoder extends CBORBase{
      * Write the given short value at the current buffer location and increase the
      * offset by two.
      */
-    final protected short writeRawShort(short val) {
-        Util.setShort(mBuffer, mStatusWords[0], val);
-        mStatusWords[0]+=2;
+    final private short writeRawShort(short val) {
+        Util.setShort(mBuffer, getCurrentOffset(), val);
+        increaseOffset((short) 2);
         return 2;
     }
-    
 
     /**
      * Write the byte array at the current buffer location and increase the offset
      * by its size.
+     * 
+     * @param value  Buffer array with the content
+     * @param offset Offset in input buffer
+     * @param length Length of data that should be encoded
+     * @return The current offset in the buffer
      */
-    final protected short writeRawByteArray(byte[] value, short offset, short length) {
-        if(length > (short) (value.length + offset) || (short)(length + getCurrentOffset()) > getBufferLength())
+    final private short writeRawByteArray(byte[] value, short offset, short length) {
+        if (length > (short) (value.length + offset) || (short)(length + getCurrentOffset()) > getBufferLength())
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         
-        length = Util.arrayCopyNonAtomic(value, offset, mBuffer, getCurrentOffset(), length);
+        short currentOff = getCurrentOffset();
+        length = (short) (Util.arrayCopyNonAtomic(value, offset, mBuffer, currentOff, length) - currentOff);
         
         increaseOffset(length);
         
