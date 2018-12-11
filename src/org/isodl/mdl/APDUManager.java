@@ -46,6 +46,9 @@ public class APDUManager {
         mStatusFlags = JCSystem.makeTransientByteArray(STATUS_FLAGS_SIZE, JCSystem.CLEAR_ON_DESELECT);
     }
 
+    /**
+     * Reset the internal state of this manager
+     */
     public void reset() {
         mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH] = 0;
         mStatusValues[VALUE_OUTGOING_LENGTH] = 0;
@@ -56,6 +59,14 @@ public class APDUManager {
         ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED, false);
     }
 
+    /**
+     * Process an APDU. Resets the state of the manager and copies the APDU buffer
+     * into the internal memory.
+     * 
+     * @param apdu
+     * @return Boolean indicating if this APDU should be processed (e.g. do not
+     *         process when connection comes from contactless interface)
+     */
     public boolean process(APDU apdu) {
         byte[] buf = apdu.getBuffer();
         
@@ -90,26 +101,47 @@ public class APDUManager {
         }
     }
 
+    /**
+     * Returns the internal buffer for outgoing traffic
+     */
     public byte[] getSendBuffer() {
         return mSendBuffer;
     }
 
+    /**
+     * Returns the internal buffer for incoming traffic
+     */
     public byte[] getReceiveBuffer() {
         return mReceiveBuffer;
     }
 
+    /**
+     * Offset in the incoming buffer for data
+     */
     public short getOffsetIncomingData() {
         return mStatusValues[VALUE_INCOMING_DATA_OFFSET];
     }
-
+    
+    /**
+     * Size of the incoming data
+     */
     public short getReceivingLength() {
         return mStatusValues[VALUE_INCOMING_LENGTH];
     }
 
+    /**
+     * Size of the internal buffer for outgoing traffic 
+     */
     public short getOutbufferLength() {
         return BUFFER_SIZE;
     }
-    
+
+    /**
+     * Receives all incoming data and stores it in the internal buffer
+     * 
+     * @return Size of the incoming data
+     * @throws ISOException
+     */
     public short receiveAll() throws ISOException {
         if (ICUtil.getBit(mStatusFlags, FLAG_APDU_RECEIVED)) {
             return mStatusValues[VALUE_INCOMING_LENGTH];
@@ -138,6 +170,11 @@ public class APDUManager {
         }
     }
 
+    /**
+     * Set the outgoing flag, indicating that data is returned to the sender
+     * 
+     * @return Expected length for the respond APDU
+     */
     public short setOutgoing() {
         APDU apdu = APDU.getCurrentAPDU();
         mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH] = apdu.setOutgoing();
@@ -146,10 +183,16 @@ public class APDUManager {
         return mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH];
     }
 
+    /**
+     * Set the length of the outgoing APDU
+     */
     public void setOutgoingLength(short outLength) {
         mStatusValues[VALUE_OUTGOING_LENGTH] = outLength;
     }
 
+    /**
+     * Send all data from the internal outgoing buffer
+     */
     public void sendAll() {
         APDU apdu = APDU.getCurrentAPDU();
         if (ICUtil.getBit(mStatusFlags, FLAG_APDU_OUTGOING)) {

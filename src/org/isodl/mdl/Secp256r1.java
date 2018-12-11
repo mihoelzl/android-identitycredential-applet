@@ -57,17 +57,17 @@ public class Secp256r1 {
 
     protected static final byte SECP256R1_K = (byte) 0x01;
 
-    protected static boolean configureECKeyParameters(ECKey eckey) {
-        try {
-            eckey.setA(EC_SECP256R1_A, (short) 0, (short) EC_SECP256R1_A.length);
-            eckey.setB(EC_SECP256R1_B, (short) 0, (short) EC_SECP256R1_B.length);
-            eckey.setFieldFP(EC_SECP256R1_FP, (short) 0, (short) EC_SECP256R1_FP.length);
-            eckey.setG(EC_SECP256R1_G, (short) 0, (short) EC_SECP256R1_G.length);
-            eckey.setR(EC_SECP256R1_R, (short) 0, (short) EC_SECP256R1_R.length);
-            eckey.setK(SECP256R1_K);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+    /**
+     * Configure the SECP256r1 parameters for a given ECKey
+     * 
+     * @param eckey Elliptic curve key that should be configure
+     */
+    protected static void configureECKeyParameters(ECKey eckey) {
+        eckey.setA(EC_SECP256R1_A, (short) 0, (short) EC_SECP256R1_A.length);
+        eckey.setB(EC_SECP256R1_B, (short) 0, (short) EC_SECP256R1_B.length);
+        eckey.setFieldFP(EC_SECP256R1_FP, (short) 0, (short) EC_SECP256R1_FP.length);
+        eckey.setG(EC_SECP256R1_G, (short) 0, (short) EC_SECP256R1_G.length);
+        eckey.setR(EC_SECP256R1_R, (short) 0, (short) EC_SECP256R1_R.length);
+        eckey.setK(SECP256R1_K);
     }
 }

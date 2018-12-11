@@ -19,19 +19,40 @@ package org.isodl.mdl;
 
 public class ICUtil {
 
+    /**
+     * Get the sign bit of a given short (returns 0 or 1)
+     */
     public static short sign(short a) {
         return (byte) ((a >>> (short) 15) & 1);
     }
 
+    /**
+     * Return the smaller short of two given values
+     */
     public static short min(short a, short b) {
-        if (sign(a) == sign(b))
-            return (a < b ? a : b);
-        else if (sign(a) == 1)
-            return b;
-        else
+        if (a < b) {
             return a;
+        }
+        return b;
     }
 
+    /**
+     * Return the bigger short of two given values
+     */
+    public static short max(short a, short b) {
+        if (a > b) {
+            return a;
+        }
+        return b;
+    }
+
+    /**
+     * Set the bit in a given bitfield array
+     * 
+     * @param bitField The bitfield array
+     * @param flag     Index in the bitfield where the bit should be set
+     * @param value    Sets bit to 0 or 1
+     */
     public static void setBit(byte[] bitField, short flag, boolean value) {
         short byteIndex = (short) (flag >>> (short) 3);
         byte bitMask = (byte) ((byte) 1 << (short) (flag & (short) 0x0007));
@@ -42,6 +63,13 @@ public class ICUtil {
         }
     }
 
+    /**
+     * Get the value of a bit inside a bitfield
+     * 
+     * @param bitField The bitfield array
+     * @param flag     Index in the bitfield that should be read
+     * @return Value at the index (0 or 1)
+     */
     public static boolean getBit(byte[] bitField, short flag) {
         short byteIndex = (short) (flag >>> (short) 3);
         byte bitMask = (byte) ((byte) 1 << (short) (flag & (short) 0x0007));

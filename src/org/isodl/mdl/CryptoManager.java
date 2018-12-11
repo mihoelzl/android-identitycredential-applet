@@ -150,13 +150,16 @@ public class CryptoManager {
         }
     }
 
+    /**
+     * Process the CREATE EPHEMERAL KEY command
+     */
     private void processCreateEphemeralKey() {
         byte[] buf = mAPDUManager.getReceiveBuffer();
                 
         switch (Util.getShort(buf, ISO7816.OFFSET_P1)) {
         case 0: // Do nothing
             break;
-        case 1: // EC_NIST_P_256
+        case 1: // EC_NIST_P_256            
             mAPDUManager.setOutgoing();
             
             // Create the ephemeral key
@@ -184,7 +187,10 @@ public class CryptoManager {
         }
     }
 
-    private void processCreateCredential() {
+    /**
+     * Process the CREATE CREDENTIAL command. Outputs the encrypted credential blob
+     */
+    private void processCreateCredential() {        
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -233,7 +239,15 @@ public class CryptoManager {
         
         mAPDUManager.setOutgoingLength(outOffset);
     }
-    
+
+    /**
+     * Wrap the credential keys into an credential blob.
+     * 
+     * @param encryptionKey     The encryption that should be used.
+     * @param outCredentialBlob Output buffer for the credentialBlob
+     * @param outOffset         Offset in the buffer
+     * @return Bytes written in the output buffer
+     */
     private short wrapCredentialBlob(AESKey encryptionKey, byte[] outCredentialBlob, short outOffset) {
         // Encoder for the CredentialKeys blob
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
@@ -302,5 +316,16 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
-
+    
+    private void assertInitializedCredentialKeys() {
+        if (!mCredentialECKeyPair.getPublic().isInitialized() || !mCredentialECKeyPair.getPrivate().isInitialized()) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+    }
+    
+    private void assertInitializedEphemeralKeys() {
+        if (!mEphemeralKeyPair.getPublic().isInitialized() || !mEphemeralKeyPair.getPrivate().isInitialized()) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+    }
 }

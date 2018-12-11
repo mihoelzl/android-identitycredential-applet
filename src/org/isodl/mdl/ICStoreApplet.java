@@ -24,12 +24,9 @@ import javacard.framework.JCSystem;
 import javacard.framework.Util;
 import javacardx.apdu.ExtendedLength;
 
-/**
- * @author michaelhoelzl
- *
- */
 public class ICStoreApplet extends Applet implements ExtendedLength {
 
+    // Version identifier of this Applet
     public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x02 };
 
     private APDUManager mAPDUManager;
@@ -48,7 +45,6 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         mAPDUManager = new APDUManager();
 
         mCryptoManager = new CryptoManager(mAPDUManager, mCBORDecoder, mCBOREncoder);
-        
     }
     
 
