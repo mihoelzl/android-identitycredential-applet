@@ -17,9 +17,11 @@
 
 package org.isodl.mdl;
 
+import javacard.framework.CardRuntimeException;
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
 import javacard.framework.Util;
+import javacardx.framework.util.UtilException;
 
 public class CBORDecoder extends CBORBase{
 
@@ -29,7 +31,7 @@ public class CBORDecoder extends CBORBase{
      * @return Major type at the current buffer location
      */
     public byte getMajorType() {
-        return (byte) ((mBuffer[mStatusWords[0]] & MAJOR_TYPE_MASK) >> 5);
+        return (byte) ((mBuffer[mStatusWords[0]] & MAJOR_TYPE_MASK) >>> 5);
     }
 
     /**
@@ -51,6 +53,20 @@ public class CBORDecoder extends CBORBase{
         return INVALID_INPUT;
     }
 
+    /**
+     * Read the major type and verifies if it matches the given type.
+     * 
+     * @param majorType The expected major type
+     * @return The additional information if check is successful, -1 otherwise
+     */
+    public short getAddInfoOfMajorType(byte majorType) {
+        byte b = mBuffer[mStatusWords[0]];
+        if (majorType != ((b & MAJOR_TYPE_MASK >>> 5))) {
+            return -1;
+        }
+        return (short) (b & ADDINFO_MASK);
+    }
+    
     /**
      * Read the 8bit integer at the current location (offset will be increased).
      * Note: this function works for positive and negative integers. Sign
@@ -149,4 +165,5 @@ public class CBORDecoder extends CBORBase{
     private byte readRawByte() {
         return mBuffer[mStatusWords[0]++];
     }
+
 }

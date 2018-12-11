@@ -274,7 +274,30 @@ public class CryptoManager {
                 CryptoBaseX.AES_GCM_TAGLEN_128) + AES_GCM_IV_SIZE + CryptoBaseX.AES_GCM_TAGLEN_128); 
     }
     
-    public void unwrapCredentialBlob(byte[] credentialBlob, short offset, short length) {
+    public void unwrapCredentialBlob(AESKey encryptionKey, byte[] credentialBlob, short offset, short length) {
+        short outLen = CryptoBaseX.doFinal(encryptionKey, CryptoBaseX.ALG_AES_GCM, Cipher.MODE_DECRYPT, // Key information
+                mTempBuffer, (short) AES_GCM_IV_SIZE, (short) (length - AES_GCM_IV_SIZE - CryptoBaseX.AES_GCM_TAGLEN_128), // Data
+                credentialBlob, offset, AES_GCM_IV_SIZE, // IV
+                mTempBuffer, (short) 0, (short) 0, // authData empty
+                mTempBuffer, (short) 0, // Output location
+                credentialBlob, (short) (offset + length - CryptoBaseX.AES_GCM_TAGLEN_128), // Tag input
+                CryptoBaseX.AES_GCM_TAGLEN_128); 
+        mCBORDecoder.init(mTempBuffer, (short) 0, outLen);
+        if(mCBORDecoder.getAddInfoOfMajorType(CBORBase.TYPE_ARRAY) == 2) {
+            if(mCBORDecoder.getAddInfoOfMajorType(CBORBase.TYPE_BYTE_STRING) != -1) {
+                short len = mCBORDecoder.readLength();
+                if (len == AES_GCM_KEY_SIZE) {
+                    mCredentialStorageKey.setKey(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len));
+                    len = mCBORDecoder.readLength();
+                    if (len == EC_KEY_SIZE) {
+                        ((ECPrivateKey)mCredentialECKeyPair.getPrivate()).setS(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
+
+                        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, true);
+                    }
+                }
+            }
+        }
+        //TODO: Throw an exception if not successful?
     }
     
     public short createCredentialCertificate(byte[] outCertificateBuffer, short outOffset) {
