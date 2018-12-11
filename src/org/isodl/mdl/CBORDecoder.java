@@ -96,6 +96,19 @@ public class CBORDecoder extends CBORBase{
 //        return -1;
 //    }
 
+    public short readLength() {
+        final byte size = getIntegerSize(); // Read length information
+        short length = 0;
+        if (size == 1) {
+            length = readInt8();
+        } else if (size == 2) {
+            length = readInt16();
+        } else { // length information above 4 bytes not supported
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
+        return length;
+    }
+        
     /**
      * Read a byte string at the current location and copy it into the given buffer
      * (offset will be increased).
@@ -105,15 +118,7 @@ public class CBORDecoder extends CBORBase{
      * @return Number of bytes copied into the buffer
      */
     public short readByteString(byte[] outBuffer, short outOffset) {
-        final byte size = getIntegerSize(); // Read length information
-        short length = 0;
-        if(size == 1) {
-            length = readInt8();
-        } else if(size == 2) {
-            length = readInt16();
-        } else { // length information above 4 bytes not supported
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
-        }
+        short length = readLength();
         return readRawByteArray(outBuffer, outOffset, length);
     }
     

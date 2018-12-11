@@ -20,6 +20,7 @@ package org.isodl.mdl;
 import javacard.framework.APDU;
 import javacard.framework.Applet;
 import javacard.framework.ISOException;
+import javacard.framework.JCSystem;
 import javacard.framework.Util;
 import javacardx.apdu.ExtendedLength;
 
@@ -47,6 +48,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         mAPDUManager = new APDUManager();
 
         mCryptoManager = new CryptoManager(mAPDUManager, mCBORDecoder, mCBOREncoder);
+        
     }
     
 
@@ -136,24 +138,29 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         
         switch(mCBORDecoder.getMajorType()) {
         case CBORDecoder.TYPE_NEGATIVE_INTEGER:
-            negInt = 1; 
+            negInt = 1;  
+            break; // CBOR encoding of negative integers not supported
         case CBORDecoder.TYPE_UNSIGNED_INTEGER:
             byte intSize = mCBORDecoder.getIntegerSize();
             if(intSize  == 1) {
-                outBuffer[0] = (byte) (mCBORDecoder.readInt8() + negInt);
-                outLength = 1;
+                outLength = mCBOREncoder.encodeUInt8(mCBORDecoder.readInt8());
             } else if(intSize == 2) {
-                Util.setShort(outBuffer, (short) 0, (short) (mCBORDecoder.readInt16() + negInt));
-                outLength = 2;
+                outLength = mCBOREncoder.encodeUInt16(mCBORDecoder.readInt16());
 //            } else if(intSize == 4) {
 //                JCint.setInt(outBuffer, (short) 0, CBORDecoder.readInt32(receiveBuffer, inOffset));
 //                outLength = 4;
             } 
             break;
-            
-        case CBORDecoder.TYPE_BYTE_STRING:
+
         case CBORDecoder.TYPE_TEXT_STRING:
-            outLength = mCBORDecoder.readByteString(outBuffer, (short) 0);
+            short len = mCBORDecoder.readLength();
+            short byteArrayOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
+            outLength = mCBOREncoder.encodeTextString(receiveBuffer, byteArrayOffset, len);
+            break;
+        case CBORDecoder.TYPE_BYTE_STRING:
+            len = mCBORDecoder.readLength();
+            byteArrayOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
+            outLength = mCBOREncoder.encodeByteString(receiveBuffer, byteArrayOffset, len);
             break;
         case CBORDecoder.TYPE_ARRAY:
             outLength = 2;
