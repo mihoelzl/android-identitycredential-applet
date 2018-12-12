@@ -23,6 +23,7 @@ import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
 import javacard.security.AESKey;
+import javacard.security.CryptoException;
 import javacard.security.ECKey;
 import javacard.security.ECPrivateKey;
 import javacard.security.ECPublicKey;
@@ -58,6 +59,8 @@ public class CryptoManager {
     // KeyPair for credential key generation and storage 
     private KeyPair mCredentialECKeyPair;
 
+    private ECPrivateKey mCredentialECPrivateKey;
+    
     // KeyPair for ephemeral key generation
     private KeyPair mEphemeralKeyPair;
     
@@ -111,8 +114,10 @@ public class CryptoManager {
                 (ECPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PUBLIC, KeyBuilder.LENGTH_EC_FP_256, false),
                 (ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE_TRANSIENT_DESELECT, KeyBuilder.LENGTH_EC_FP_256, false));
 
+        mCredentialECPrivateKey = (ECPrivateKey) mCredentialECKeyPair.getPrivate();
+        
         // At the moment we only support SEC-P256r1. Hence, can be configured at install time.
-        Secp256r1.configureECKeyParameters((ECKey) mCredentialECKeyPair.getPrivate());
+        Secp256r1.configureECKeyParameters(mCredentialECPrivateKey);
         Secp256r1.configureECKeyParameters((ECKey) mCredentialECKeyPair.getPublic());
         Secp256r1.configureECKeyParameters((ECKey) mEphemeralKeyPair.getPrivate());
         Secp256r1.configureECKeyParameters((ECKey) mEphemeralKeyPair.getPublic());
@@ -131,7 +136,7 @@ public class CryptoManager {
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, false);
 
         mCredentialStorageKey.clearKey();
-        mCredentialECKeyPair.getPrivate().clearKey();
+        mCredentialECPrivateKey.clearKey();
     }
     
     public void process() {
@@ -143,8 +148,13 @@ public class CryptoManager {
         case ISO7816.INS_ICS_CREATE_CREDENTIAL:
             processCreateCredential();
             break;
-        case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
+        case ISO7816.INS_ICS_SIGN_PERSONALIZED_DATA:
             break;
+        case ISO7816.INS_ICS_LOAD_CREDENTIAL_BLOB:
+            processLoadCredentialBlob();
+            break;
+        case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
+            break;            
         default: 
             ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
         }
@@ -175,7 +185,7 @@ public class CryptoManager {
             outLength += mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
             
             // Get the private key and append it to the output
-            length = ((ECPrivateKey)mEphemeralKeyPair.getPrivate()).getS(mTempBuffer, (short)0);
+            length = mCredentialECPrivateKey.getS(mTempBuffer, (short)0);
             outLength += mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
             
             mAPDUManager.setOutgoingLength(outLength);
@@ -231,7 +241,7 @@ public class CryptoManager {
         outOffset += wrapCredentialBlob(encryptionKey, outBuffer, outOffset);
         
         // Initialize the signature creation object
-        mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
+        mECSignature.init(mCredentialECPrivateKey, Signature.MODE_SIGN);
         
         // TODO: add CBOR structure for signature
         // Add credential type to the signature
@@ -258,7 +268,7 @@ public class CryptoManager {
         mCredentialStorageKey.getKey(mTempBuffer, mCBOREncoder.startByteString(AES_GCM_KEY_SIZE));
         
         // Copy the credential private key in the tempBuffer
-        ((ECPrivateKey) mCredentialECKeyPair.getPrivate()).getS(mTempBuffer, mCBOREncoder.startByteString(EC_KEY_SIZE));
+        mCredentialECPrivateKey.getS(mTempBuffer, mCBOREncoder.startByteString(EC_KEY_SIZE));
 
         short dataLength = mCBOREncoder.getCurrentOffset();
         // Generate the IV
@@ -273,8 +283,40 @@ public class CryptoManager {
                 outCredentialBlob, (short) (outOffset + AES_GCM_IV_SIZE + dataLength), // Tag output
                 CryptoBaseX.AES_GCM_TAGLEN_128) + AES_GCM_IV_SIZE + CryptoBaseX.AES_GCM_TAGLEN_128); 
     }
+
+    /**
+     * Process the LOAD CREDENTIAL command. Throws an exception if decryption is unsuccessful
+     */
+    private void processLoadCredentialBlob() {
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
+        
+        AESKey encryptionKey = mHBK; 
+
+        // Check if it is a test credential
+        if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) == 0x1) { // Test credential
+            ICUtil.setBit(mStatusFlags, FLAG_TEST_CREDENTIAL, true);
+
+            encryptionKey = mTestKey;
+        } else if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x0) {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+        
+        try {
+            if(receivingLength <= inOffset+AES_GCM_IV_SIZE+AES_GCM_TAG_SIZE) {
+                ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);    
+            }
+            
+            if(!unwrapCredentialBlob(encryptionKey, receiveBuffer, inOffset, receivingLength)) {
+                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
+        } catch(CryptoException e) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+    }
     
-    public void unwrapCredentialBlob(AESKey encryptionKey, byte[] credentialBlob, short offset, short length) {
+    public boolean unwrapCredentialBlob(AESKey encryptionKey, byte[] credentialBlob, short offset, short length) throws CryptoException{
         short outLen = CryptoBaseX.doFinal(encryptionKey, CryptoBaseX.ALG_AES_GCM, Cipher.MODE_DECRYPT, // Key information
                 mTempBuffer, (short) AES_GCM_IV_SIZE, (short) (length - AES_GCM_IV_SIZE - CryptoBaseX.AES_GCM_TAGLEN_128), // Data
                 credentialBlob, offset, AES_GCM_IV_SIZE, // IV
@@ -282,22 +324,26 @@ public class CryptoManager {
                 mTempBuffer, (short) 0, // Output location
                 credentialBlob, (short) (offset + length - CryptoBaseX.AES_GCM_TAGLEN_128), // Tag input
                 CryptoBaseX.AES_GCM_TAGLEN_128); 
+        
         mCBORDecoder.init(mTempBuffer, (short) 0, outLen);
         if(mCBORDecoder.getAddInfoOfMajorType(CBORBase.TYPE_ARRAY) == 2) {
             if(mCBORDecoder.getAddInfoOfMajorType(CBORBase.TYPE_BYTE_STRING) != -1) {
                 short len = mCBORDecoder.readLength();
+                
                 if (len == AES_GCM_KEY_SIZE) {
                     mCredentialStorageKey.setKey(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len));
                     len = mCBORDecoder.readLength();
+                    
                     if (len == EC_KEY_SIZE) {
-                        ((ECPrivateKey)mCredentialECKeyPair.getPrivate()).setS(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
+                        mCredentialECPrivateKey.setS(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
 
                         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, true);
+                        return true;
                     }
                 }
             }
         }
-        //TODO: Throw an exception if not successful?
+        return false;
     }
     
     public short createCredentialCertificate(byte[] outCertificateBuffer, short outOffset) {
@@ -341,7 +387,7 @@ public class CryptoManager {
     }
     
     private void assertInitializedCredentialKeys() {
-        if (!mCredentialECKeyPair.getPublic().isInitialized() || !mCredentialECKeyPair.getPrivate().isInitialized()) {
+        if (!mCredentialECKeyPair.getPublic().isInitialized() || !mCredentialECPrivateKey.isInitialized()) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
