@@ -138,13 +138,13 @@ public class CBOREncoder extends CBORBase{
     final private short writeUInt8(byte type, byte value) {
         writeRawByte((byte) (type | ENCODED_ONE_BYTE));
         writeRawByte(value);
-        return 2;
+        return (short) 2;
     }
 
     final private short writeUInt16(byte type, short value) {
         writeRawByte((byte) (type | ENCODED_TWO_BYTES));
         writeRawShort(value);
-        return 3;
+        return (short) 3;
     }
 
     /**
@@ -154,7 +154,7 @@ public class CBOREncoder extends CBORBase{
     final private short writeRawByte(byte val) {
         mBuffer[getCurrentOffset()] = val;
         increaseOffset((short) 1);
-        return 1;
+        return (short) 1;
     }
     
     /**
@@ -164,7 +164,7 @@ public class CBOREncoder extends CBORBase{
     final private short writeRawShort(short val) {
         Util.setShort(mBuffer, getCurrentOffset(), val);
         increaseOffset((short) 2);
-        return 2;
+        return (short) 2;
     }
 
     /**

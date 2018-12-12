@@ -82,14 +82,18 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             case ISO7816.INS_ICS_CREATE_CREDENTIAL:
             case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
             case ISO7816.INS_ICS_CREATE_EPHEMERAL_KEY:
-                mCryptoManager.process();
-                break;
-
             case ISO7816.INS_ICS_PERSONALIZE_ACCESS_CONTROL:
-                processPersonalizeAccessControl();
+            case ISO7816.INS_ICS_PERSONALIZE_ATTRIBUTE:
+            case ISO7816.INS_ICS_SIGN_PERSONALIZED_DATA:
+            case ISO7816.INS_ICS_LOAD_CREDENTIAL_BLOB:
+                mCryptoManager.process();
                 break;
             case ISO7816.INS_ICS_GET_ENTRY:
                 processGetEntry();
+                break;
+            case ISO7816.INS_ICS_CREATE_SIGNATURE:
+                break;
+            case ISO7816.INS_ICS_GET_ATTESTATION_CERT:
                 break;
             case ISO7816.INS_ICS_TEST_CBOR:
                 processTestCBOR();
@@ -102,22 +106,6 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         mAPDUManager.sendAll();
     }
 
-    private void processPersonalizeAccessControl()
-    //byte[] data, short dataOffset, short dataLength, byte[] outIVbuffer, byte outIVoffset, byte[] outTag, short outTagOffset, byte[] outBuffer, byte outBufferOffset) 
-    {
-
-//        
-//        CryptoBaseX cipher = new CryptoBaseX();
-//        
-//        cipher.doFinal(key, CryptoBaseX.ALG_AES_GCM, Cipher.MODE_ENCRYPT, 
-//                data, dataOffset, dataLength, 
-//                ivBuffer, ivBufferOffset, ivBufferLength, 
-//                authData, authDataOffset, authDataLength, 
-//                outBuffer, outBufferOffset, 
-//                outTag, outTagOffset, CryptoBaseX.AES_GCM_TAGLEN_128);
-        
-    }
-    
     private void processTestCBOR() {
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
@@ -202,4 +190,5 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         }
         mAPDUManager.setOutgoingLength(outLength);
     }
+    
 }

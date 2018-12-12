@@ -31,7 +31,7 @@ public class CBORDecoder extends CBORBase{
      * @return Major type at the current buffer location
      */
     public byte getMajorType() {
-        return (byte) ((mBuffer[mStatusWords[0]] & MAJOR_TYPE_MASK) >>> 5);
+        return (byte) ((mBuffer[mStatusWords[0]] & MAJOR_TYPE_MASK) >> 5);
     }
 
     /**
@@ -54,17 +54,18 @@ public class CBORDecoder extends CBORBase{
     }
 
     /**
-     * Read the major type and verifies if it matches the given type.
+     * Read the major type and verifies if it matches the given type (increases
+     * offset by one). Throws an ISOExeption if the major type is not correct.
      * 
      * @param majorType The expected major type
-     * @return The additional information if check is successful, -1 otherwise
+     * @return The length in the addition information field
      */
-    public short getAddInfoOfMajorType(byte majorType) {
-        byte b = mBuffer[mStatusWords[0]];
-        if (majorType != ((b & MAJOR_TYPE_MASK >>> 5))) {
-            return -1;
+    public short readMajorType(byte majorType) {
+        byte b = mBuffer[getCurrentOffset()]; 
+        if (majorType != ((b & MAJOR_TYPE_MASK) >> 5)) {
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
-        return (short) (b & ADDINFO_MASK);
+        return readLength();
     }
     
     /**
@@ -81,9 +82,9 @@ public class CBORDecoder extends CBORBase{
         } else if(eventlength == ENCODED_ONE_BYTE) {
             return (byte)(readRawByte() & 0xff);              
         } else {
-            ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
-        return 0;
+        return 0; // Never reached
     }
 
 
@@ -99,9 +100,9 @@ public class CBORDecoder extends CBORBase{
         if(addInfo == ENCODED_TWO_BYTES) {
             return Util.getShort(mBuffer, getCurrentOffsetAndIncrease((short) 2));  
         } else { 
-            ISOException.throwIt(ISO7816.SW_WRONG_DATA);
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
-        return 0;
+        return 0; // Never reached
     }
     
 //    public static int readInt32(byte[] cborInput, short offset) {
@@ -111,6 +112,24 @@ public class CBORDecoder extends CBORBase{
 //        } 
 //        return -1;
 //    }
+
+    public void readInt32(byte[] output, short offset) {
+        final byte addInfo = (byte) (readRawByte() & ADDINFO_MASK);
+        if (addInfo == ENCODED_FOUR_BYTES) {
+            Util.arrayCopyNonAtomic(mBuffer, getCurrentOffsetAndIncrease((short) 4), output, (short) (offset), (short) 4);
+        } else { 
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
+    }
+    
+    public void readInt64(byte[] output, short offset) {
+        final byte addInfo = (byte) (readRawByte() & ADDINFO_MASK);
+        if (addInfo == ENCODED_EIGHT_BYTES) {
+            Util.arrayCopyNonAtomic(mBuffer, getCurrentOffsetAndIncrease((short) 8), output, (short) (offset), (short) 8);
+        } else { 
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
+    }
 
     public short readLength() {
         final byte size = getIntegerSize(); // Read length information
