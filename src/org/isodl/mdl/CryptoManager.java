@@ -149,7 +149,7 @@ public class CryptoManager {
             processPersonalizeAccessControl();
             break;
         case ISO7816.INS_ICS_PERSONALIZE_ATTRIBUTE:
-            processPersonalizeAccessControl();
+            processPersonalizeDataAttribute();
             break;
         case ISO7816.INS_ICS_SIGN_PERSONALIZED_DATA:
             break;
@@ -370,9 +370,54 @@ public class CryptoManager {
         
         return 0;
     }
+
+    /**
+     * Process PERSONALIZE DATA ATTRIBUTE command. Throws an exception if the
+     * received CBOR structure is invalid or if the credential is not initialized.
+     */
+    private void processPersonalizeDataAttribute() throws ISOException {
+        assertInPersonalizationState();
+        
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
+
+        // Check P1P2
+        if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) == 0x1) { // Directly available data
+            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);  // Not implemented yet   
+        } else if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x0) { 
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+
+        mAPDUManager.setOutgoing();
+        byte[] outBuffer = mAPDUManager.getSendBuffer();
+        
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
+        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
+
+        if(mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY) == 2) {
+            // Read additional data length (used as authentication data)
+            short authDataOffset = mCBORDecoder.getCurrentOffset();
+            // Skip the actual content
+            short authDataLength = (short)(mCBORDecoder.skipEntry() - authDataOffset);
+            // Read data length 
+            short dataOffset = mCBORDecoder.getCurrentOffset();
+            // Skip the actual content
+            short dataLength = (short) (mCBORDecoder.skipEntry() - dataOffset);
+            
+            // Encode output
+            short outOffset = mCBOREncoder.startByteString((short) (dataLength + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
+            
+            encryptCredentialData(receiveBuffer, dataOffset, dataLength, receiveBuffer, authDataOffset, authDataLength,
+                    outBuffer, outOffset);
+            
+            mAPDUManager.setOutgoingLength(mCBORDecoder.getCurrentOffset());
+        }
+    }
     
     /**
-     * Process the PERSONALIZE ACCESS CONTROL command. Throws an exception if received CBOR structure is invalid.
+     * Process the PERSONALIZE ACCESS CONTROL command. Throws an exception if
+     * received CBOR structure is invalid or the credential is not initialized.
      */
     private void processPersonalizeAccessControl() throws ISOException {
         assertInPersonalizationState();
@@ -381,10 +426,17 @@ public class CryptoManager {
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
 
+        // Check P1P2
+        if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) == 0x1) { // Directly available data
+            ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);  // Not implemented yet   
+        } else if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x0) { 
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+        
         mAPDUManager.setOutgoing();
         byte[] outBuffer = mAPDUManager.getSendBuffer();
 
-        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
+        mCBORDecoder.init(inOffset, receivingLength);
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
 
         // Get the number of received profiles
@@ -397,14 +449,14 @@ public class CryptoManager {
         
         short profileLength = 0, profileOffset = 0;
         short encodedLocation = 0;
-        
+
         // Read each profile and compute the MAC
-        for(short i=0; i<nrOfProfiles; i++) {
+        for (short i = 0; i < nrOfProfiles; i++) {
             // Start location of the profile
             profileOffset = mCBORDecoder.getCurrentOffset();
             
             // Skip the actual access control profile (we will only encrypt it
-            profileLength = mCBORDecoder.skipEntry();
+            profileLength = (short)(mCBORDecoder.skipEntry() - profileOffset);
             
             // Compute the MAC of the profile and encode it as byte string
             encodedLocation = mCBOREncoder.startByteString((short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
@@ -419,20 +471,22 @@ public class CryptoManager {
     }
     
     /**
-     * Encrypt the given data with the storage key using AES-GCM. The data output format is R || encrypted data || Tag.
+     * Encrypt the given data with the storage key using AES-GCM. The data output
+     * format is R || encrypted data || Tag.
      * 
-     * @param data Input data that should be encrypted
-     * @param offset Offset in buffer
-     * @param length Length of data
-     * @param authData Authentication data 
+     * @param data           Input data that should be encrypted
+     * @param offset         Offset in buffer
+     * @param length         Length of data
+     * @param authData       Authentication data
      * @param authDataOffset Offset of authentication data in buffer
-     * @param authLen Length of authentication data
-     * @param outBuffer Output buffer
-     * @param outOffset Offset in output buffer
+     * @param authLen        Length of authentication data
+     * @param outBuffer      Output buffer
+     * @param outOffset      Offset in output buffer
      * 
      * @return Number of bytes written to output buffer
      */
-    public short encryptCredentialData(byte[] data, short offset, short length, byte[] authData, short authDataOffset, short authLen, byte[] outBuffer, short outOffset) {
+    public short encryptCredentialData(byte[] data, short offset, short length, byte[] authData, short authDataOffset,
+            short authLen, byte[] outBuffer, short outOffset) {
         assertCredentialLoaded();
         
         // Generate the IV
@@ -448,19 +502,21 @@ public class CryptoManager {
     }
     
     /**
-     * Decrypt the given data with the storage key using AES-GCM. The input format for data has to be R || encrypted data || Tag.
+     * Decrypt the given data with the storage key using AES-GCM. The input format
+     * for data has to be R || encrypted data || Tag.
      * 
-     * @param encryptedData Input data that should be decrypted
-     * @param offset Offset in buffer
-     * @param length Length of data
-     * @param authData Authentication data 
+     * @param encryptedData  Input data that should be decrypted
+     * @param offset         Offset in buffer
+     * @param length         Length of data
+     * @param authData       Authentication data
      * @param authDataOffset Offset of authentication data in buffer
-     * @param authLen Length of authentication data
-     * @param outBuffer Output buffer for decrypted data
-     * @param outOffset Offset in output buffer
+     * @param authLen        Length of authentication data
+     * @param outBuffer      Output buffer for decrypted data
+     * @param outOffset      Offset in output buffer
      * @return Number of bytes written to output buffer
      */
-    public short decryptCredentialData(byte[] encryptedData, short offset, short length, byte[] authData, short authDataOffset, short authLen, byte[] outData, short outOffset) {
+    public short decryptCredentialData(byte[] encryptedData, short offset, short length, byte[] authData,
+            short authDataOffset, short authLen, byte[] outData, short outOffset) {
         assertCredentialLoaded();
         
         return (short) (CryptoBaseX.doFinal(mCredentialStorageKey, CryptoBaseX.ALG_AES_GCM, Cipher.MODE_DECRYPT, // Key information

@@ -17,11 +17,12 @@
 
 package org.isodl.mdl;
 
+import javacard.framework.APDU;
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 
-public class CBORBase {
+public abstract class CBORBase {
 
     // Mask for the major CBOR type
     protected static final byte MAJOR_TYPE_MASK = (byte) 0x07;
@@ -82,7 +83,18 @@ public class CBORBase {
     protected CBORBase() {
         mStatusWords = JCSystem.makeTransientShortArray((short) 2, JCSystem.CLEAR_ON_RESET);     
     }
-    
+
+    /**
+     * Initializes the encoder/decoder without buffer (use the APDU buffer instead).
+     * 
+     * @param offset Offset in APDU buffer where content should be read
+     * @param length Length in the APDU buffer
+     */
+    final public void init(short off, short length) {
+        mBuffer = null;
+        mStatusWords[0] = off;
+        mStatusWords[1] = (short)(off + length);
+    }
     /**
      * Initializes with a given array and the given offset.
      * @param buffer Buffer with CBOR content
@@ -93,7 +105,6 @@ public class CBORBase {
         mStatusWords[0] = off;
         mStatusWords[1] = (short)(off + length);
     }
-
     /**
      * Reset the internal state of the parser 
      */
@@ -131,13 +142,33 @@ public class CBORBase {
     }
 
     /**
+     * Get the current raw byte (do not increase offset
+     * @return Current byte value
+     */
+    protected byte getRawByte() {
+        return getBuffer()[mStatusWords[0]];
+    }
+
+    /**
+     * Returns the internal buffer or the APDU buffer if non is initializes
+     * 
+     * @return The buffer for encoding/decoding
+     */
+    protected byte[] getBuffer() {
+        if(mBuffer == null) {
+            return APDU.getCurrentAPDUBuffer();
+        } 
+        return mBuffer;
+    }
+    
+    /**
      * Increase the current offset and return the new value.
      * 
      * @param inc Value that should be added to the offset
      * @return New offset value (after increase)
      */
     final protected short increaseOffset(short inc) {
-        if((short)(getCurrentOffset() + inc) > getBufferLength())
+        if((short)(getCurrentOffset() + inc) > getBufferLength() || inc < 0)
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         
         mStatusWords[0]+=inc;

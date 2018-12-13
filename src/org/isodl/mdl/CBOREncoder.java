@@ -152,7 +152,7 @@ public class CBOREncoder extends CBORBase{
      * by one.
      */
     final private short writeRawByte(byte val) {
-        mBuffer[getCurrentOffset()] = val;
+        getBuffer()[getCurrentOffset()] = val;
         increaseOffset((short) 1);
         return (short) 1;
     }
@@ -162,7 +162,7 @@ public class CBOREncoder extends CBORBase{
      * offset by two.
      */
     final private short writeRawShort(short val) {
-        Util.setShort(mBuffer, getCurrentOffset(), val);
+        Util.setShort(getBuffer(), getCurrentOffset(), val);
         increaseOffset((short) 2);
         return (short) 2;
     }
@@ -181,7 +181,7 @@ public class CBOREncoder extends CBORBase{
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         
         short currentOff = getCurrentOffset();
-        length = (short) (Util.arrayCopyNonAtomic(value, offset, mBuffer, currentOff, length) - currentOff);
+        length = (short) (Util.arrayCopyNonAtomic(value, offset, getBuffer(), currentOff, length) - currentOff);
         
         increaseOffset(length);
         

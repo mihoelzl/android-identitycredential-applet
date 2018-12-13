@@ -112,6 +112,8 @@ public class APDUManager {
      * Returns the internal buffer for incoming traffic
      */
     public byte[] getReceiveBuffer() {
+        if(mReceiveBuffer == null)
+            return APDU.getCurrentAPDUBuffer();
         return mReceiveBuffer;
     }
 
