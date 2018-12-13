@@ -24,7 +24,7 @@ import javacard.framework.JCSystem;
 public class CBORBase {
 
     // Mask for the major CBOR type
-    protected static final byte MAJOR_TYPE_MASK = (byte) 0xE0;
+    protected static final byte MAJOR_TYPE_MASK = (byte) 0x07;
 
     // Mask for additional information in the low-order 5 bits 
     protected static final byte ADDINFO_MASK = (byte) 0x1F;
@@ -91,7 +91,7 @@ public class CBORBase {
     final public void init(byte[] buffer, short off, short length) {
         mBuffer = buffer;
         mStatusWords[0] = off;
-        mStatusWords[1] = length;
+        mStatusWords[1] = (short)(off + length);
     }
 
     /**

@@ -31,7 +31,7 @@ public class CBORDecoder extends CBORBase{
      * @return Major type at the current buffer location
      */
     public byte getMajorType() {
-        return (byte) ((mBuffer[mStatusWords[0]] & MAJOR_TYPE_MASK) >> 5);
+        return (byte) ((mBuffer[mStatusWords[0]] >>> 5) & MAJOR_TYPE_MASK);
     }
 
     /**
@@ -53,6 +53,33 @@ public class CBORDecoder extends CBORBase{
         return INVALID_INPUT;
     }
 
+    public short skipEntry() {
+        short len = 0;
+        short mapentries=1;
+        switch(getMajorType()) {
+        case TYPE_UNSIGNED_INTEGER:
+        case TYPE_NEGATIVE_INTEGER:
+            len = increaseOffset(getIntegerSize());
+            break;
+        case TYPE_TEXT_STRING:
+        case TYPE_BYTE_STRING:
+            len = increaseOffset(readLength());
+            break;
+        case TYPE_MAP:
+            mapentries = 2; // Number of entries are doubled for maps (keys + values) 
+        case TYPE_ARRAY:
+            mapentries = (short) (mapentries * readLength());
+            for (short i = 0; i < mapentries; i++) {
+                len += skipEntry();
+            }
+            break;
+        case TYPE_TAG:
+        case TYPE_FLOAT:
+            // TODO: implement
+        }
+        return len;
+    }
+
     /**
      * Read the major type and verifies if it matches the given type (increases
      * offset by one). Throws an ISOExeption if the major type is not correct.
@@ -62,7 +89,7 @@ public class CBORDecoder extends CBORBase{
      */
     public short readMajorType(byte majorType) {
         byte b = mBuffer[getCurrentOffset()]; 
-        if (majorType != ((b & MAJOR_TYPE_MASK) >> 5)) {
+        if (majorType != ((b >>> 5) & MAJOR_TYPE_MASK)) {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
         return readLength();

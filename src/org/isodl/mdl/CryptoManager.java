@@ -37,7 +37,8 @@ public class CryptoManager {
 
     private static final short FLAG_TEST_CREDENTIAL = 0;
     private static final short FLAG_CREATED_EPHEMERAL_KEY = 1;
-    private static final short FLAG_CREDENIAL_INITIALIZED = 2;
+    private static final short FLAG_CREDENIAL_PERSONALIZATION_STATE = 2;
+    private static final short FLAG_CREDENIAL_INITIALIZED = 3;
     private static final short STATUS_FLAGS_SIZE = 1;
 
     private static final short TEMP_BUFFER_SIZE = 128;
@@ -130,6 +131,7 @@ public class CryptoManager {
         ICUtil.setBit(mStatusFlags, FLAG_TEST_CREDENTIAL, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREATED_EPHEMERAL_KEY, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, false);
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE, false);
 
         mCredentialStorageKey.clearKey();
     }
@@ -164,7 +166,7 @@ public class CryptoManager {
     /**
      * Process the CREATE EPHEMERAL KEY command
      */
-    private void processCreateEphemeralKey() {
+    private void processCreateEphemeralKey() throws ISOException {
         mAPDUManager.receiveAll();
         byte[] buf = mAPDUManager.getReceiveBuffer();
                 
@@ -182,15 +184,15 @@ public class CryptoManager {
 
             // Start the CBOR encoding of the output 
             mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
-            short outLength = mCBOREncoder.startArray((short) 2);
+            mCBOREncoder.startArray((short) 2);
             
-            outLength += mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
+            mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
             
             // Get the private key and append it to the output
             length = ((ECPrivateKey)mEphemeralKeyPair.getPrivate()).getS(mTempBuffer, (short)0);
-            outLength += mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
+            mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
             
-            mAPDUManager.setOutgoingLength(outLength);
+            mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
 
             ICUtil.setBit(mStatusFlags, FLAG_CREATED_EPHEMERAL_KEY, true);
             break;
@@ -202,7 +204,7 @@ public class CryptoManager {
     /**
      * Process the CREATE CREDENTIAL command. Outputs the encrypted credential blob
      */
-    private void processCreateCredential() {        
+    private void processCreateCredential() throws ISOException{        
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -237,19 +239,27 @@ public class CryptoManager {
         // Create a new credential key
         mCredentialECKeyPair.genKeyPair();
 
+        // Credential keys are loaded
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, true);
+
+        // Set the Applet in the PERSONALIZATION state
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE, true);
         
-        // encrypt storage key and credential key for returning
-        outOffset += wrapCredentialBlob(encryptionKey, outBuffer, outOffset);
-        
-        // Initialize the signature creation object
-        mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
-        
-        // TODO: add CBOR structure for signature
-        // Add credential type to the signature
-        mECSignature.update(receiveBuffer, inOffset, receivingLength);
-        
-        mAPDUManager.setOutgoingLength(outOffset);
+        try {
+            // encrypt storage key and credential key for returning
+            outOffset += wrapCredentialBlob(encryptionKey, outBuffer, outOffset);
+            
+            // Initialize the signature creation object
+            mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
+            
+            // TODO: add CBOR structure for signature
+            // Add credential type to the signature
+            mECSignature.update(receiveBuffer, inOffset, receivingLength);
+            
+            mAPDUManager.setOutgoingLength(outOffset);
+        } catch (CryptoException e) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
     }
 
     /**
@@ -260,7 +270,7 @@ public class CryptoManager {
      * @param outOffset         Offset in the buffer
      * @return Bytes written in the output buffer
      */
-    private short wrapCredentialBlob(AESKey encryptionKey, byte[] outCredentialBlob, short outOffset) {
+    private short wrapCredentialBlob(AESKey encryptionKey, byte[] outCredentialBlob, short outOffset) throws CryptoException {
         // Encoder for the CredentialKeys blob
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
         // Encode an array consisting of [storageKey, credentialPrivKey]
@@ -289,7 +299,7 @@ public class CryptoManager {
     /**
      * Process the LOAD CREDENTIAL command. Throws an exception if decryption is unsuccessful
      */
-    private void processLoadCredentialBlob() {
+    private void processLoadCredentialBlob() throws ISOException{
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -309,8 +319,14 @@ public class CryptoManager {
             if(receivingLength <= (short)(inOffset+AES_GCM_IV_SIZE+AES_GCM_TAG_SIZE)) {
                 ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);    
             }
+            mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
             
-            if(!unwrapCredentialBlob(encryptionKey, receiveBuffer, inOffset, receivingLength)) {
+            short bstLen;
+            if((bstLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING)) < 0){
+                ISOException.throwIt(ISO7816.SW_DATA_INVALID);    
+            }
+            
+            if(!unwrapCredentialBlob(encryptionKey, receiveBuffer, mCBORDecoder.getCurrentOffset(), bstLen)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
         } catch(CryptoException e) {
@@ -329,19 +345,20 @@ public class CryptoManager {
         
         mCBORDecoder.init(mTempBuffer, (short) 0, outLen);
         if(mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY) == 2) {
-            if(mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING) != -1) {
-                short len = mCBORDecoder.readLength();
+            short len;
+            if((len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING)) < 0) {
+                ISOException.throwIt(ISO7816.SW_DATA_INVALID);    
+            }
+            
+            if (len == AES_GCM_KEY_SIZE) {
+                mCredentialStorageKey.setKey(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len));
+                len = mCBORDecoder.readLength();
                 
-                if (len == AES_GCM_KEY_SIZE) {
-                    mCredentialStorageKey.setKey(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len));
-                    len = mCBORDecoder.readLength();
-                    
-                    if (len == EC_KEY_SIZE) {
-                        ((ECPrivateKey)mCredentialECKeyPair.getPrivate()).setS(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
+                if (len == EC_KEY_SIZE) {
+                    ((ECPrivateKey)mCredentialECKeyPair.getPrivate()).setS(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
 
-                        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, true);
-                        return true;
-                    }
+                    ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, true);
+                    return true;
                 }
             }
         }
@@ -357,8 +374,8 @@ public class CryptoManager {
     /**
      * Process the PERSONALIZE ACCESS CONTROL command. Throws an exception if received CBOR structure is invalid.
      */
-    private void processPersonalizeAccessControl() {
-        assertCredentialLoaded();
+    private void processPersonalizeAccessControl() throws ISOException {
+        assertInPersonalizationState();
         
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
@@ -370,26 +387,33 @@ public class CryptoManager {
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
 
+        // Get the number of received profiles
         short nrOfProfiles = 0;
-        
         if((nrOfProfiles = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY)) < 0) {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
         
-        short outLength = mCBOREncoder.startArray(nrOfProfiles);
-        short profileLength = 0;
+        mCBOREncoder.startArray(nrOfProfiles);
+        
+        short profileLength = 0, profileOffset = 0;
         short encodedLocation = 0;
         
+        // Read each profile and compute the MAC
         for(short i=0; i<nrOfProfiles; i++) {
-            profileLength = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            encodedLocation = mCBOREncoder.startByteString(profileLength);
-
-            outLength += encryptCredentialData(mTempBuffer, (short) 0, (short) 0,  // No data input
-                    receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(profileLength), profileLength, // Profile as auth data 
+            // Start location of the profile
+            profileOffset = mCBORDecoder.getCurrentOffset();
+            
+            // Skip the actual access control profile (we will only encrypt it
+            profileLength = mCBORDecoder.skipEntry();
+            
+            // Compute the MAC of the profile and encode it as byte string
+            encodedLocation = mCBOREncoder.startByteString((short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
+            encryptCredentialData(mTempBuffer, (short) 0, (short) 0,  // No data input
+                    receiveBuffer, profileOffset, profileLength, // Profile as auth data 
                     outBuffer, encodedLocation); // Output data
         }
 
-        mAPDUManager.setOutgoingLength(outLength);
+        mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
         
         // TODO: signature creation
     }
@@ -468,6 +492,12 @@ public class CryptoManager {
 
     private void assertCredentialLoaded() {
         if (!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED)) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+    }
+
+    private void assertInPersonalizationState() {
+        if (!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE)) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }

@@ -2,3 +2,5 @@ testCBORByteArray
 testCBORInteger
 testCreateEphemeralKey
 testCreateCredential
+testLoadCredential
+testPersonalizeCredential

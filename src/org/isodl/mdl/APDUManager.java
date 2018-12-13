@@ -159,10 +159,10 @@ public class APDUManager {
                 ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
             }
             
-            Util.arrayCopyNonAtomic(apduBuffer, receiveOffset, receiveBuffer, (short)0, bytesReceived);
+            Util.arrayCopyNonAtomic(apduBuffer, receiveOffset, receiveBuffer, apdu.getOffsetCdata(), bytesReceived);
             
             mStatusValues[VALUE_INCOMING_LENGTH] = lc;
-            mStatusValues[VALUE_INCOMING_DATA_OFFSET] = (short)0;
+            mStatusValues[VALUE_INCOMING_DATA_OFFSET] = apdu.getOffsetCdata();
             
             ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED, true);
             
