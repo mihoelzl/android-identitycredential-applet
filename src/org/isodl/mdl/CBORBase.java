@@ -67,7 +67,7 @@ public abstract class CBORBase {
     // CBOR encoded boolean - true
     protected static final byte ENCODED_TRUE = (byte) 0xF5;
     // CBOR encoded null
-    protected static final byte ENCODED_ULL = (byte) 0xF6;
+    protected static final byte ENCODED_NULL = (byte) 0xF6;
     // CBOR encoded undefined value
     protected static final byte ENCODED_UNDEFINED = (byte) 0xF7;
     

@@ -35,18 +35,27 @@ import javacardx.crypto.Cipher;
 
 public class CryptoManager {
 
-    private static final short FLAG_TEST_CREDENTIAL = 0;
-    private static final short FLAG_CREATED_EPHEMERAL_KEY = 1;
-    private static final short FLAG_CREDENIAL_PERSONALIZATION_STATE = 2;
-    private static final short FLAG_CREDENIAL_INITIALIZED = 3;
-    private static final short STATUS_FLAGS_SIZE = 1;
+    private static final byte FLAG_TEST_CREDENTIAL = 0;
+    private static final byte FLAG_CREATED_EPHEMERAL_KEY = 1;
+    private static final byte FLAG_CREDENIAL_KEYS_INITIALIZED = 2;
+    private static final byte FLAG_CREDENIAL_PERSONALIZATION_STATE = 3;
+    private static final byte FLAG_CREDENIAL_PERSONALIZING_PROFILES = 4;
+    private static final byte FLAG_CREDENIAL_PERSONALIZING_ENTRIES = 5;
+    private static final byte STATUS_FLAGS_SIZE = 1;
+
+
+    private static final byte STATUS_PROFILES_TOTAL = 0;
+    private static final byte STATUS_PROFILES_PERSONALIZED = 1;
+    private static final byte STATUS_ENTRIES_TOTAL = 2;
+    private static final byte STATUS_ENTRIES_PERSONALIZED = 3;
+    private static final byte STATUS_WORDS = 4;
 
     private static final short TEMP_BUFFER_SIZE = 128;
     
-    private static final short AES_GCM_KEY_SIZE = 32;
-    private static final short AES_GCM_IV_SIZE = 12;
-    private static final short AES_GCM_TAG_SIZE = 16;
-    private static final short EC_KEY_SIZE = 32;
+    private static final byte AES_GCM_KEY_SIZE = 32;
+    private static final byte AES_GCM_IV_SIZE = 12;
+    private static final byte AES_GCM_TAG_SIZE = 16;
+    private static final byte EC_KEY_SIZE = 32;
     
     // Hardware bound key, initialized during Applet installation
     private AESKey mHBK;
@@ -82,13 +91,17 @@ public class CryptoManager {
     // Temporary buffer for all cryptography operations
     private final byte[] mTempBuffer;
     
-    // Temporary buffer in memory for status information
+    // Temporary buffer in memory for status flags
     private final byte[] mStatusFlags;
+
+    // Temporary buffer in memory for status information
+    private final short[] mStatusWords;
 
 
     public CryptoManager(APDUManager apduManager, CBORDecoder decoder, CBOREncoder encoder) {
         mTempBuffer = JCSystem.makeTransientByteArray((short)TEMP_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
-        mStatusFlags = JCSystem.makeTransientByteArray((short)STATUS_FLAGS_SIZE, JCSystem.CLEAR_ON_DESELECT);
+        mStatusFlags = JCSystem.makeTransientByteArray((short)(STATUS_FLAGS_SIZE), JCSystem.CLEAR_ON_DESELECT);
+        mStatusWords = JCSystem.makeTransientShortArray(STATUS_WORDS, JCSystem.CLEAR_ON_DESELECT);
 
         // Secure Random number generation for HBK
         mRandomData = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
@@ -130,10 +143,13 @@ public class CryptoManager {
     public void reset() {
         ICUtil.setBit(mStatusFlags, FLAG_TEST_CREDENTIAL, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREATED_EPHEMERAL_KEY, false);
-        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, false);
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_KEYS_INITIALIZED, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE, false);
-
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, false);
+        
         mCredentialStorageKey.clearKey();
+        mCredentialECKeyPair.getPrivate().clearKey();
     }
     
     public void process() {
@@ -152,6 +168,7 @@ public class CryptoManager {
             processPersonalizeDataAttribute();
             break;
         case ISO7816.INS_ICS_SIGN_PERSONALIZED_DATA:
+            processSignPersonalizedData();
             break;
         case ISO7816.INS_ICS_LOAD_CREDENTIAL_BLOB:
             processLoadCredentialBlob();
@@ -167,7 +184,7 @@ public class CryptoManager {
      * Process the CREATE EPHEMERAL KEY command
      */
     private void processCreateEphemeralKey() throws ISOException {
-        mAPDUManager.receiveAll();
+        
         byte[] buf = mAPDUManager.getReceiveBuffer();
                 
         switch (Util.getShort(buf, ISO7816.OFFSET_P1)) {
@@ -240,11 +257,12 @@ public class CryptoManager {
         mCredentialECKeyPair.genKeyPair();
 
         // Credential keys are loaded
-        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, true);
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_KEYS_INITIALIZED, true);
 
         // Set the Applet in the PERSONALIZATION state
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE, true);
         
+        // Return credentialBlob and start signature creation
         try {
             // encrypt storage key and credential key for returning
             outOffset += wrapCredentialBlob(encryptionKey, outBuffer, outOffset);
@@ -252,9 +270,14 @@ public class CryptoManager {
             // Initialize the signature creation object
             mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
             
-            // TODO: add CBOR structure for signature
-            // Add credential type to the signature
-            mECSignature.update(receiveBuffer, inOffset, receivingLength);
+            // Add credential type to the signature ["credentialType" : tstr, ...
+            mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+            mCBOREncoder.startMap((short) 4);
+            mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_CREDENTIALTYPE, (short) 0,
+                    (short) ICConstants.CBOR_MAPKEY_CREDENTIALTYPE.length);
+            mCBOREncoder.encodeTextString(receiveBuffer, inOffset, receivingLength);
+            
+            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
             
             mAPDUManager.setOutgoingLength(outOffset);
         } catch (CryptoException e) {
@@ -359,7 +382,7 @@ public class CryptoManager {
                 if (len == EC_KEY_SIZE) {
                     ((ECPrivateKey)mCredentialECKeyPair.getPrivate()).setS(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
 
-                    ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED, true);
+                    ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_KEYS_INITIALIZED, true);
                     return true;
                 }
             }
@@ -385,12 +408,29 @@ public class CryptoManager {
         short inOffset = mAPDUManager.getOffsetIncomingData();
 
         // Check P1P2
-        if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) == 0x1) { // Directly available data
+        if(receiveBuffer[ISO7816.OFFSET_P1] == 0x1) { // Directly available data
             ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);  // Not implemented yet   
-        } else if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x0) { 
+        } else if(receiveBuffer[ISO7816.OFFSET_P1] != 0x0) { 
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
-        }
+        }       
 
+        if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES)) {
+            // First entry personalization request, get the total number of profiles from P2
+            mStatusWords[STATUS_ENTRIES_TOTAL] = receiveBuffer[ISO7816.OFFSET_P2];
+            
+            // Add the text string "Entries" and the start array to the signature
+            mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+            
+            mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_ENTRIES, (short) 0,
+                    (short) ICConstants.CBOR_MAPKEY_ENTRIES.length); 
+            mCBOREncoder.startArray(mStatusWords[STATUS_ENTRIES_TOTAL]);
+            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+            
+            mStatusWords[STATUS_ENTRIES_PERSONALIZED] = 0;
+            
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, true);
+        }
+        
         mAPDUManager.setOutgoing();
         byte[] outBuffer = mAPDUManager.getSendBuffer();
         
@@ -415,6 +455,12 @@ public class CryptoManager {
             
             mAPDUManager.setOutgoingLength(mCBORDecoder.getCurrentOffset());
         }
+
+        mStatusWords[STATUS_ENTRIES_PERSONALIZED]++;
+        if(mStatusWords[STATUS_ENTRIES_PERSONALIZED] == mStatusWords[STATUS_ENTRIES_TOTAL]) {
+            // Finished with entry personalization
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);
+        } 
     }
     
     /**
@@ -429,10 +475,27 @@ public class CryptoManager {
         short inOffset = mAPDUManager.getOffsetIncomingData();
 
         // Check P1P2
-        if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) == 0x1) { // Directly available data
+        if(receiveBuffer[ISO7816.OFFSET_P1] == 0x1) { // Directly available data
             ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);  // Not implemented yet   
-        } else if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x0) { 
+        } else if(receiveBuffer[ISO7816.OFFSET_P1] != 0x0) { 
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+        
+        if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES)) {
+            // First profile personalization request, get the total number of profiles from P2
+            mStatusWords[STATUS_PROFILES_TOTAL] = receiveBuffer[ISO7816.OFFSET_P2];
+            
+            // Add the text string "AccessControlProfile" and the start array to the signature
+            mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+            
+            mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_ACCESSCONTROLPROFILES, (short) 0,
+                    (short) ICConstants.CBOR_MAPKEY_ACCESSCONTROLPROFILES.length); 
+            mCBOREncoder.startArray(mStatusWords[STATUS_PROFILES_TOTAL]);
+            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+            
+            mStatusWords[STATUS_PROFILES_PERSONALIZED] = 0;
+            
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, true);
         }
         
         mAPDUManager.setOutgoing();
@@ -460,18 +523,63 @@ public class CryptoManager {
             // Skip the actual access control profile (we will only encrypt it
             profileLength = (short)(mCBORDecoder.skipEntry() - profileOffset);
             
+            // Add the profile to the signature
+            mECSignature.update(receiveBuffer, profileOffset, profileLength);
+            
             // Compute the MAC of the profile and encode it as byte string
             encodedLocation = mCBOREncoder.startByteString((short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
             encryptCredentialData(mTempBuffer, (short) 0, (short) 0,  // No data input
                     receiveBuffer, profileOffset, profileLength, // Profile as auth data 
                     outBuffer, encodedLocation); // Output data
         }
+        
+        mStatusWords[STATUS_PROFILES_PERSONALIZED] += nrOfProfiles;
+        if(mStatusWords[STATUS_PROFILES_PERSONALIZED] == mStatusWords[STATUS_PROFILES_TOTAL]) {
+            // Finished with profile personalization
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);
+        } else if(mStatusWords[STATUS_PROFILES_PERSONALIZED] > mStatusWords[STATUS_PROFILES_TOTAL]) {
+            // Too many profiles already, abort
+            reset();
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
 
         mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
-        
-        // TODO: signature creation
     }
-    
+
+    private void processSignPersonalizedData() {
+        assertCredentialLoaded();
+        assertInPersonalizationState();
+
+        byte[] buf = mAPDUManager.getReceiveBuffer();
+
+        // Check if personalization is finished
+        if (ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES)
+                || ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES)) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+        
+        // Check P1P2
+        if(Util.getShort(buf, ISO7816.OFFSET_P1) != 0x0) {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+        
+        mAPDUManager.setOutgoing();
+        byte[] outBuffer = mAPDUManager.getSendBuffer();
+
+        // Encode "teststring" : boolean
+        mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+        mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_TESTCREDENTIAL, (short) 0,
+                (short) ICConstants.CBOR_MAPKEY_TESTCREDENTIAL.length);
+        mCBOREncoder.encodeBoolean(ICUtil.getBit(mStatusFlags, FLAG_TEST_CREDENTIAL));
+        
+        // Finish signature and send data
+        short outLen = mECSignature.sign(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset(), outBuffer, (short) 0);
+        
+        // Finish Applet personalization state
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE, false);
+        mAPDUManager.setOutgoingLength(outLen);
+    }
+
     /**
      * Encrypt the given data with the storage key using AES-GCM. The data output
      * format is R || encrypted data || Tag.
@@ -549,7 +657,7 @@ public class CryptoManager {
     }
 
     private void assertCredentialLoaded() {
-        if (!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_INITIALIZED)) {
+        if (!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_KEYS_INITIALIZED)) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }

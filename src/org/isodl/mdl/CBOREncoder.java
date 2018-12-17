@@ -59,6 +59,12 @@ public class CBOREncoder extends CBORBase{
         return getCurrentOffsetAndIncrease(length);
     }
 
+
+    public short startTextString(short length) {
+        encodeValue((byte) (TYPE_TEXT_STRING << 5), length);
+        return getCurrentOffsetAndIncrease(length);
+    }
+    
     /**
      * Encodes the given byte string at the current buffer location.
      * 
@@ -123,6 +129,18 @@ public class CBOREncoder extends CBORBase{
     public short encodeUInt64(byte[] valueBuf, short valueOffset) {           
         writeRawByte((byte) (TYPE_UNSIGNED_INTEGER | ENCODED_EIGHT_BYTES));            
         return (short) (writeRawByteArray(valueBuf, valueOffset, (short) 8) + 1); 
+    }
+    /**
+     * Encodes the given boolean
+     * 
+     * @return The number of bytes written to buffer
+     */
+    public short encodeBoolean(boolean value) {
+        if(value) {
+            return writeRawByte(ENCODED_TRUE);   
+        } else {
+            return writeRawByte(ENCODED_FALSE);            
+        }
     }
     
     final private short encodeValue(byte majorType, short value) {      
