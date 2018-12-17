@@ -27,7 +27,7 @@ import javacardx.apdu.ExtendedLength;
 public class ICStoreApplet extends Applet implements ExtendedLength {
 
     // Version identifier of this Applet
-    public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x02 };
+    public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x03 };
 
     private APDUManager mAPDUManager;
 
@@ -86,7 +86,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             case ISO7816.INS_ICS_PERSONALIZE_ATTRIBUTE:
             case ISO7816.INS_ICS_SIGN_PERSONALIZED_DATA:
             case ISO7816.INS_ICS_LOAD_CREDENTIAL_BLOB:
-                mCryptoManager.process();
+//                mCryptoManager.process();
                 break;
             case ISO7816.INS_ICS_GET_ENTRY:
                 processGetEntry();

@@ -406,9 +406,11 @@ public class CryptoManager {
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
-
+        boolean directlyAvailable = false;
+        
         // Check P1P2
         if(receiveBuffer[ISO7816.OFFSET_P1] == 0x1) { // Directly available data
+            directlyAvailable = true;
             ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);  // Not implemented yet   
         } else if(receiveBuffer[ISO7816.OFFSET_P1] != 0x0) { 
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
@@ -420,12 +422,12 @@ public class CryptoManager {
             
             // Add the text string "Entries" and the start array to the signature
             mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
-            
             mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_ENTRIES, (short) 0,
                     (short) ICConstants.CBOR_MAPKEY_ENTRIES.length); 
             mCBOREncoder.startArray(mStatusWords[STATUS_ENTRIES_TOTAL]);
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
             
+            // Start personalization, reset the counter
             mStatusWords[STATUS_ENTRIES_PERSONALIZED] = 0;
             
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, true);
@@ -438,20 +440,43 @@ public class CryptoManager {
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
 
         if(mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY) == 2) {
-            // Read additional data length (used as authentication data)
-            short authDataOffset = mCBORDecoder.getCurrentOffset();
-            // Skip the actual content
-            short authDataLength = (short)(mCBORDecoder.skipEntry() - authDataOffset);
-            // Read data length 
+            // Receiving data is encoded as array = [AdditionalData, Entry]
+            // Read additional data (used for authentication data in AES-GCM)
+            short addDataOffset = mCBORDecoder.getCurrentOffset();
+            // Skip the actual content (the additional data) and get the length of it
+            short addDataLength = (short)(mCBORDecoder.skipEntry() - addDataOffset);
+            
+            // Read the entry. 
+            // Get the current offset (data entry begin)
             short dataOffset = mCBORDecoder.getCurrentOffset();
-            // Skip the actual content
+            // Skip the actual content (data entry) and get the length of it
             short dataLength = (short) (mCBORDecoder.skipEntry() - dataOffset);
             
             // Encode output
             short outOffset = mCBOREncoder.startByteString((short) (dataLength + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
             
-            encryptCredentialData(receiveBuffer, dataOffset, dataLength, receiveBuffer, authDataOffset, authDataLength,
+            encryptCredentialData(receiveBuffer, dataOffset, dataLength, receiveBuffer, addDataOffset, addDataLength,
                     outBuffer, outOffset);
+            
+            // Add entry to signature
+            // Signature is structured as Map = { "name" : bstr, "value" : bstr / int,
+            //           "issuerSignature" : bstr, "accessControlProfiles" : [ *uint],
+            //           "directlyAvailable" : bool }
+            mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+            mCBOREncoder.startMap((short) 5);
+
+            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+            // add the additional data ("name" : bstr, "accessControlProfiles" : [ *uint]) 
+            mECSignature.update(receiveBuffer, (short) (addDataOffset + 1), (short) (addDataLength - 1));
+            // add the data entry to signature ("value" : bstr / int "issuerSignature" : bstr)
+            mECSignature.update(receiveBuffer, (short) (dataOffset + 1), (short) (dataLength - 1));
+            
+            // Add directly available bit information ("directlyAvailable" : bool) 
+            mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+            mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_DIRECTLYAVAILABLE, (short) 0,
+                    (short) ICConstants.CBOR_MAPKEY_DIRECTLYAVAILABLE.length);
+            mCBOREncoder.encodeBoolean(directlyAvailable);
+            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
             
             mAPDUManager.setOutgoingLength(mCBORDecoder.getCurrentOffset());
         }
