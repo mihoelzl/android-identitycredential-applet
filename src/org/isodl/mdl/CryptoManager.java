@@ -347,12 +347,14 @@ public class CryptoManager {
         if(mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY) == 2) {
             short len;
             if((len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING)) < 0) {
-                ISOException.throwIt(ISO7816.SW_DATA_INVALID);    
+                return false;   
             }
             
             if (len == AES_GCM_KEY_SIZE) {
                 mCredentialStorageKey.setKey(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len));
-                len = mCBORDecoder.readLength();
+                if((len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING)) < 0) {
+                    return false;   
+                }
                 
                 if (len == EC_KEY_SIZE) {
                     ((ECPrivateKey)mCredentialECKeyPair.getPrivate()).setS(mTempBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
