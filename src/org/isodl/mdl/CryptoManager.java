@@ -400,7 +400,8 @@ public class CryptoManager {
      */
     private void processPersonalizeDataAttribute() throws ISOException {
         assertInPersonalizationState();
-        
+        assertFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_PROFILES);
+            
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -422,11 +423,13 @@ public class CryptoManager {
             mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_ENTRIES, (short) 0,
                     (short) ICConstants.CBOR_MAPKEY_ENTRIES.length); 
             mCBOREncoder.startArray(mStatusWords[STATUS_ENTRIES_TOTAL]);
-            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
             
             mStatusWords[STATUS_ENTRIES_PERSONALIZED] = 0;
+
+            // Update the signature now 
+            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
             
-            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, true);
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, true);
         }
         
         mAPDUManager.setOutgoing();
@@ -457,7 +460,7 @@ public class CryptoManager {
         mStatusWords[STATUS_ENTRIES_PERSONALIZED]++;
         if(mStatusWords[STATUS_ENTRIES_PERSONALIZED] == mStatusWords[STATUS_ENTRIES_TOTAL]) {
             // Finished with entry personalization
-            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, false);
         } 
     }
     
@@ -467,7 +470,8 @@ public class CryptoManager {
      */
     private void processPersonalizeAccessControl() throws ISOException {
         assertInPersonalizationState();
-        
+        assertFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES);
+
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -548,13 +552,12 @@ public class CryptoManager {
         assertCredentialLoaded();
         assertInPersonalizationState();
 
+        // Check if personalization is finished
+        assertFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES);
+        assertFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_PROFILES);
+
         byte[] buf = mAPDUManager.getReceiveBuffer();
 
-        // Check if personalization is finished
-        if (ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES)
-                || ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES)) {
-            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-        }
         
         // Check P1P2
         if(Util.getShort(buf, ISO7816.OFFSET_P1) != 0x0) {
@@ -655,17 +658,23 @@ public class CryptoManager {
     }
 
     private void assertCredentialLoaded() {
-        if (!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_KEYS_INITIALIZED)) {
+        assertFlagSet(FLAG_CREDENIAL_KEYS_INITIALIZED);
+    }
+
+    private void assertInPersonalizationState() {
+        assertFlagSet(FLAG_CREDENIAL_PERSONALIZATION_STATE);
+    }
+    private void assertFlagSet(byte statusFlag) {
+        if (!ICUtil.getBit(mStatusFlags, statusFlag)) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+    }
+    private void assertFlagNotSet(byte statusFlag) {
+        if (ICUtil.getBit(mStatusFlags, statusFlag)) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
 
-    private void assertInPersonalizationState() {
-        if (!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE)) {
-            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-        }
-    }
-    
     private void assertInitializedCredentialKeys() {
         if (!mCredentialECKeyPair.getPublic().isInitialized() || !mCredentialECKeyPair.getPrivate().isInitialized()) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
