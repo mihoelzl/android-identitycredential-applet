@@ -161,6 +161,9 @@ public class CryptoManager {
         case ISO7816.INS_ICS_CREATE_CREDENTIAL:
             processCreateCredential();
             break;
+        case ISO7816.INS_ICS_GET_ATTESTATION_CERT:
+            processGetAttestationCertificate();
+            break;
         case ISO7816.INS_ICS_PERSONALIZE_ACCESS_CONTROL:
             processPersonalizeAccessControl();
             break;
@@ -390,10 +393,9 @@ public class CryptoManager {
         return false;
     }
     
-    public short createCredentialCertificate(byte[] outCertificateBuffer, short outOffset) {
+    public void processGetAttestationCertificate() {
         assertCredentialLoaded();
-        
-        return 0;
+        // TODO implement
     }
 
     /**
@@ -402,7 +404,8 @@ public class CryptoManager {
      */
     private void processPersonalizeDataAttribute() throws ISOException {
         assertInPersonalizationState();
-        
+        assertStatusFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_PROFILES);
+            
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -425,12 +428,14 @@ public class CryptoManager {
             mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_ENTRIES, (short) 0,
                     (short) ICConstants.CBOR_MAPKEY_ENTRIES.length); 
             mCBOREncoder.startArray(mStatusWords[STATUS_ENTRIES_TOTAL]);
-            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
             
             // Start personalization, reset the counter
             mStatusWords[STATUS_ENTRIES_PERSONALIZED] = 0;
+
+            // Update the signature now 
+            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
             
-            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, true);
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, true);
         }
         
         mAPDUManager.setOutgoing();
@@ -484,7 +489,7 @@ public class CryptoManager {
         mStatusWords[STATUS_ENTRIES_PERSONALIZED]++;
         if(mStatusWords[STATUS_ENTRIES_PERSONALIZED] == mStatusWords[STATUS_ENTRIES_TOTAL]) {
             // Finished with entry personalization
-            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, false);
         } 
     }
     
@@ -494,7 +499,8 @@ public class CryptoManager {
      */
     private void processPersonalizeAccessControl() throws ISOException {
         assertInPersonalizationState();
-        
+        assertStatusFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES);
+
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -508,16 +514,16 @@ public class CryptoManager {
         
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES)) {
             // First profile personalization request, get the total number of profiles from P2
-            mStatusWords[STATUS_PROFILES_TOTAL] = receiveBuffer[ISO7816.OFFSET_P2];
+            mStatusWords[STATUS_PROFILES_TOTAL] = (short) (receiveBuffer[ISO7816.OFFSET_P2] & 0xff);
             
             // Add the text string "AccessControlProfile" and the start array to the signature
             mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
             
             mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_ACCESSCONTROLPROFILES, (short) 0,
-                    (short) ICConstants.CBOR_MAPKEY_ACCESSCONTROLPROFILES.length); 
+                    (short) ICConstants.CBOR_MAPKEY_ACCESSCONTROLPROFILES.length);
             mCBOREncoder.startArray(mStatusWords[STATUS_PROFILES_TOTAL]);
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
-            
+
             mStatusWords[STATUS_PROFILES_PERSONALIZED] = 0;
             
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, true);
@@ -571,17 +577,20 @@ public class CryptoManager {
         mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
     }
 
+    /**
+     * Process the SIGN PERSONALIZED DATA command. Throws an ISO exception if status
+     * is not reached (no credential keys, not in personalization state)
+     */
     private void processSignPersonalizedData() {
         assertCredentialLoaded();
         assertInPersonalizationState();
 
+        // Check if personalization is finished
+        assertStatusFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES);
+        assertStatusFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_PROFILES);
+
         byte[] buf = mAPDUManager.getReceiveBuffer();
 
-        // Check if personalization is finished
-        if (ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES)
-                || ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES)) {
-            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-        }
         
         // Check P1P2
         if(Util.getShort(buf, ISO7816.OFFSET_P1) != 0x0) {
@@ -682,17 +691,23 @@ public class CryptoManager {
     }
 
     private void assertCredentialLoaded() {
-        if (!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_KEYS_INITIALIZED)) {
+        assertStatusFlagSet(FLAG_CREDENIAL_KEYS_INITIALIZED);
+    }
+
+    private void assertInPersonalizationState() {
+        assertStatusFlagSet(FLAG_CREDENIAL_PERSONALIZATION_STATE);
+    }
+    private void assertStatusFlagSet(byte statusFlag) {
+        if (!ICUtil.getBit(mStatusFlags, statusFlag)) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+    }
+    private void assertStatusFlagNotSet(byte statusFlag) {
+        if (ICUtil.getBit(mStatusFlags, statusFlag)) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
 
-    private void assertInPersonalizationState() {
-        if (!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE)) {
-            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
-        }
-    }
-    
     private void assertInitializedCredentialKeys() {
         if (!mCredentialECKeyPair.getPublic().isInitialized() || !mCredentialECKeyPair.getPrivate().isInitialized()) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
