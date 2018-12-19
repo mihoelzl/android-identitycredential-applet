@@ -1,9 +1,4 @@
-/terminal
-/mode trace=on
-/atr
-
-/select F0|ICApplet
-
+selectApplet
 
 /send 80530000#(64|test|) 64746573749000
 /send 80530000#(64|tester|) 64746573749000

@@ -15,7 +15,7 @@
 ** limitations under the License.
 */
 
-package org.isodl.mdl;
+package android.security.identity_credential;
 
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;

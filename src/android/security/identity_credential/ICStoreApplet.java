@@ -15,7 +15,7 @@
 ** limitations under the License.
 */
 
-package org.isodl.mdl;
+package android.security.identity_credential;
 
 import javacard.framework.APDU;
 import javacard.framework.Applet;
@@ -86,14 +86,13 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             case ISO7816.INS_ICS_PERSONALIZE_ATTRIBUTE:
             case ISO7816.INS_ICS_SIGN_PERSONALIZED_DATA:
             case ISO7816.INS_ICS_LOAD_CREDENTIAL_BLOB:
-//                mCryptoManager.process();
+            case ISO7816.INS_ICS_GET_ATTESTATION_CERT:
+                mCryptoManager.process();
                 break;
             case ISO7816.INS_ICS_GET_ENTRY:
                 processGetEntry();
                 break;
             case ISO7816.INS_ICS_CREATE_SIGNATURE:
-                break;
-            case ISO7816.INS_ICS_GET_ATTESTATION_CERT:
                 break;
             case ISO7816.INS_ICS_TEST_CBOR:
                 processTestCBOR();

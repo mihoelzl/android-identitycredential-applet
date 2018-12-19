@@ -15,7 +15,7 @@
 ** limitations under the License.
 */
 
-package org.isodl.mdl;
+package android.security.identity_credential;
 
 public class ICConstants {
 

@@ -15,7 +15,7 @@
 ** limitations under the License.
 */
 
-package org.isodl.mdl;
+package android.security.identity_credential;
 
 import com.nxp.id.jcopx.security.CryptoBaseX;
 
@@ -36,11 +36,10 @@ import javacardx.crypto.Cipher;
 public class CryptoManager {
 
     private static final byte FLAG_TEST_CREDENTIAL = 0;
-    private static final byte FLAG_CREATED_EPHEMERAL_KEY = 1;
-    private static final byte FLAG_CREDENIAL_KEYS_INITIALIZED = 2;
-    private static final byte FLAG_CREDENIAL_PERSONALIZATION_STATE = 3;
-    private static final byte FLAG_CREDENIAL_PERSONALIZING_PROFILES = 4;
-    private static final byte FLAG_CREDENIAL_PERSONALIZING_ENTRIES = 5;
+    private static final byte FLAG_CREDENIAL_KEYS_INITIALIZED = 1;
+    private static final byte FLAG_CREDENIAL_PERSONALIZATION_STATE = 2;
+    private static final byte FLAG_CREDENIAL_PERSONALIZING_PROFILES = 3;
+    private static final byte FLAG_CREDENIAL_PERSONALIZING_ENTRIES = 4;
     private static final byte STATUS_FLAGS_SIZE = 1;
 
 
@@ -124,7 +123,7 @@ public class CryptoManager {
         
         mEphemeralKeyPair = new KeyPair(
                 (ECPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PUBLIC, KeyBuilder.LENGTH_EC_FP_256, false),
-                (ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE_TRANSIENT_DESELECT, KeyBuilder.LENGTH_EC_FP_256, false));
+                (ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE_TRANSIENT_RESET, KeyBuilder.LENGTH_EC_FP_256, false));
 
         // At the moment we only support SEC-P256r1. Hence, can be configured at install time.
         Secp256r1.configureECKeyParameters((ECKey) mCredentialECKeyPair.getPrivate());
@@ -142,7 +141,6 @@ public class CryptoManager {
 
     public void reset() {
         ICUtil.setBit(mStatusFlags, FLAG_TEST_CREDENTIAL, false);
-        ICUtil.setBit(mStatusFlags, FLAG_CREATED_EPHEMERAL_KEY, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_KEYS_INITIALIZED, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);
@@ -187,7 +185,7 @@ public class CryptoManager {
      * Process the CREATE EPHEMERAL KEY command
      */
     private void processCreateEphemeralKey() throws ISOException {
-        
+        mAPDUManager.receiveAll();
         byte[] buf = mAPDUManager.getReceiveBuffer();
                 
         switch (Util.getShort(buf, ISO7816.OFFSET_P1)) {
@@ -213,8 +211,6 @@ public class CryptoManager {
             mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
             
             mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
-
-            ICUtil.setBit(mStatusFlags, FLAG_CREATED_EPHEMERAL_KEY, true);
             break;
         default: 
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
@@ -314,7 +310,7 @@ public class CryptoManager {
         
         // Encrypt and return the size of the result (credentialBlob)
         return (short) (CryptoBaseX.doFinal(encryptionKey, CryptoBaseX.ALG_AES_GCM, // Key information
-                Cipher.MODE_ENCRYPT, mTempBuffer, (short) 0, dataLength, // Data
+                Cipher.MODE_ENCRYPT, mTempBuffer, (short) 0, dataLength, // Data (keys)
                 outCredentialBlob, outOffset, AES_GCM_IV_SIZE, // IV
                 mTempBuffer, (short) 0, (short) 0, // authData empty
                 outCredentialBlob, (short) (outOffset + AES_GCM_IV_SIZE), // Output location

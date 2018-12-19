@@ -15,7 +15,7 @@
 ** limitations under the License.
 */
 
-package org.isodl.mdl;
+package android.security.identity_credential;
 
 public interface ISO7816 extends javacard.framework.ISO7816 {
     /**
