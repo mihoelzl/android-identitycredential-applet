@@ -55,7 +55,7 @@ public class Secp256r1 {
             (byte) 0x17, (byte) 0x9e, (byte) 0x84, (byte) 0xf3, (byte) 0xb9, (byte) 0xca, (byte) 0xc2, (byte) 0xfc,
             (byte) 0x63, (byte) 0x25, (byte) 0x51 };
 
-    protected static final byte SECP256R1_K = (byte) 0x01;
+    protected static final byte EC_SECP256R1_K = (byte) 0x01;
 
     /**
      * Configure the SECP256r1 parameters for a given ECKey
@@ -68,6 +68,6 @@ public class Secp256r1 {
         eckey.setFieldFP(EC_SECP256R1_FP, (short) 0, (short) EC_SECP256R1_FP.length);
         eckey.setG(EC_SECP256R1_G, (short) 0, (short) EC_SECP256R1_G.length);
         eckey.setR(EC_SECP256R1_R, (short) 0, (short) EC_SECP256R1_R.length);
-        eckey.setK(SECP256R1_K);
+        eckey.setK(EC_SECP256R1_K);
     }
 }

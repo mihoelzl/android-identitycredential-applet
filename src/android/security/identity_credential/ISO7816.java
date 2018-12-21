@@ -29,19 +29,24 @@ public interface ISO7816 extends javacard.framework.ISO7816 {
     /**
      * Credential provisioning instructions
      */
-    public static final byte INS_ICS_CREATE_CREDENTIAL = (short) 0x10;
-    public static final byte INS_ICS_GET_ATTESTATION_CERT = (short) 0x11;
-    public static final byte INS_ICS_PERSONALIZE_ACCESS_CONTROL = (short) 0x12;
-    public static final byte INS_ICS_PERSONALIZE_ATTRIBUTE = (short) 0x13;
-    public static final byte INS_ICS_SIGN_PERSONALIZED_DATA = (short) 0x14;
+    public static final byte INS_ICS_CREATE_CREDENTIAL = (byte) 0x10;
+    public static final byte INS_ICS_GET_ATTESTATION_CERT = (byte) 0x11;
+    public static final byte INS_ICS_PERSONALIZE_ACCESS_CONTROL = (byte) 0x12;
+    public static final byte INS_ICS_PERSONALIZE_ATTRIBUTE = (byte) 0x13;
+    public static final byte INS_ICS_SIGN_PERSONALIZED_DATA = (byte) 0x14;
 
     /**
      * Credential Management instructions
      */
-    public static final byte INS_ICS_LOAD_CREDENTIAL_BLOB = (short) 0x30;
-    public static final byte INS_ICS_AUTHENTICATE = (short) 0x31;
-    public static final byte INS_ICS_LOAD_ACCESS_CONTROL_PROFILE = (short) 0x32;
-    public static final byte INS_ICS_GET_ENTRY = (short) 0x3A;
-    public static final byte INS_ICS_CREATE_SIGNATURE = (short) 0x3B;
-    public static final byte INS_ICS_CREATE_SIGNING_KEY= (short) 0x40;
+    public static final byte INS_ICS_LOAD_CREDENTIAL_BLOB = (byte) 0x30;
+    public static final byte INS_ICS_AUTHENTICATE = (byte) 0x31;
+    public static final byte INS_ICS_LOAD_ACCESS_CONTROL_PROFILE = (byte) 0x32;
+    public static final byte INS_ICS_GET_ENTRY = (byte) 0x3A;
+    public static final byte INS_ICS_CREATE_SIGNATURE = (byte) 0x3B;
+    public static final byte INS_ICS_CREATE_SIGNING_KEY= (byte) 0x40;
+    
+    /**
+     * Instruction bytes for standard ISO7816-4 commands 
+     */
+    public static final byte INS_GET_RESPONSE = (byte) 0xC0;
 }

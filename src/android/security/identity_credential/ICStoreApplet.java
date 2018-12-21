@@ -29,13 +29,13 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     // Version identifier of this Applet
     public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x03 };
 
-    private APDUManager mAPDUManager;
+    private final APDUManager mAPDUManager;
 
-    private CryptoManager mCryptoManager;
+    private final CryptoManager mCryptoManager;
     
-    private CBORDecoder mCBORDecoder;
+    private final CBORDecoder mCBORDecoder;
 
-    private CBOREncoder mCBOREncoder;
+    private final CBOREncoder mCBOREncoder;
     
     private ICStoreApplet() {
         mCBORDecoder = new CBORDecoder();
@@ -110,7 +110,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
         
-        short le = mAPDUManager.setOutgoing();
+        short le = mAPDUManager.setOutgoing(true);
         byte[] outBuffer = mAPDUManager.getSendBuffer();
         short outLength = 0;
 

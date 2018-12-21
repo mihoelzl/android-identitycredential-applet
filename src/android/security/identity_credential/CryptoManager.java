@@ -57,35 +57,35 @@ public class CryptoManager {
     private static final byte EC_KEY_SIZE = 32;
     
     // Hardware bound key, initialized during Applet installation
-    private AESKey mHBK;
+    private final AESKey mHBK;
     
     // Test key, initialized with only zeros during Applet installation
-    private AESKey mTestKey;
+    private final AESKey mTestKey;
 
     // Storage key for a credential
-    private AESKey mCredentialStorageKey;
+    private final AESKey mCredentialStorageKey;
 
     // KeyPair for credential key generation and storage 
-    private KeyPair mCredentialECKeyPair;
+    private final KeyPair mCredentialECKeyPair;
 
     // KeyPair for ephemeral key generation
-    private KeyPair mEphemeralKeyPair;
+    private final KeyPair mEphemeralKeyPair;
     
     // Signature object for creating and verifying credential signatures 
-    private Signature mECSignature;
+    private final Signature mECSignature;
     
     // Random data generator 
-    private RandomData mRandomData;
+    private final RandomData mRandomData;
     //TODO: implement my own counter based IV generator
     
     // Reference to the internal APDU manager instance
-    private APDUManager mAPDUManager;
+    private final APDUManager mAPDUManager;
     
     // Reference to the internal CBOR decoder instance
-    private CBORDecoder mCBORDecoder;
+    private final CBORDecoder mCBORDecoder;
     
     // Reference to the internal CBOR encoder instance
-    private CBOREncoder mCBOREncoder;
+    private final CBOREncoder mCBOREncoder;
 
     // Temporary buffer for all cryptography operations
     private final byte[] mTempBuffer;
@@ -408,16 +408,15 @@ public class CryptoManager {
         boolean directlyAvailable = false;
         
         // Check P1P2
-        if(receiveBuffer[ISO7816.OFFSET_P1] == 0x1) { // Directly available data
+        if((receiveBuffer[ISO7816.OFFSET_P1] & 0x80) == 0x80) { // Directly available data = first bit in P1 set
             directlyAvailable = true;
             ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);  // Not implemented yet   
-        } else if(receiveBuffer[ISO7816.OFFSET_P1] != 0x0) { 
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
-        }       
+        }    
 
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES)) {
-            // First entry personalization request, get the total number of profiles from P2
-            mStatusWords[STATUS_ENTRIES_TOTAL] = receiveBuffer[ISO7816.OFFSET_P2];
+            // First entry personalization request, get the total number of profiles from P1(lower 4 bits) + P2
+            mStatusWords[STATUS_ENTRIES_TOTAL] = (short) (((short) receiveBuffer[ISO7816.OFFSET_P1] & 0x0F) << 8
+                    + receiveBuffer[ISO7816.OFFSET_P2]);
             
             // Add the text string "Entries" and the start array to the signature
             mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
@@ -502,15 +501,14 @@ public class CryptoManager {
         short inOffset = mAPDUManager.getOffsetIncomingData();
 
         // Check P1P2
-        if(receiveBuffer[ISO7816.OFFSET_P1] == 0x1) { // Directly available data
+        if((receiveBuffer[ISO7816.OFFSET_P1] & 0x80) == 0x80) { // Directly available data = first bit in P1 set
             ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);  // Not implemented yet   
-        } else if(receiveBuffer[ISO7816.OFFSET_P1] != 0x0) { 
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
-        }
+        }    
         
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES)) {
-            // First profile personalization request, get the total number of profiles from P2
-            mStatusWords[STATUS_PROFILES_TOTAL] = (short) (receiveBuffer[ISO7816.OFFSET_P2] & 0xff);
+            // First entry personalization request, get the total number of profiles from P1(lower 4 bits) + P2
+            mStatusWords[STATUS_ENTRIES_TOTAL] = (short) (((short) receiveBuffer[ISO7816.OFFSET_P1] & 0x0F) << 8
+                    + receiveBuffer[ISO7816.OFFSET_P2]);
             
             // Add the text string "AccessControlProfile" and the start array to the signature
             mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
@@ -528,7 +526,7 @@ public class CryptoManager {
         mAPDUManager.setOutgoing();
         byte[] outBuffer = mAPDUManager.getSendBuffer();
 
-        mCBORDecoder.init(inOffset, receivingLength);
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
 
         // Get the number of received profiles

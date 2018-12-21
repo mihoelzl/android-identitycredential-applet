@@ -101,7 +101,11 @@ public abstract class CBORBase {
      * @param offset Offset in buffer where content should be read/written
      */
     final public void init(byte[] buffer, short off, short length) {
-        mBuffer = buffer;
+        if (buffer != APDU.getCurrentAPDUBuffer()) { // do not store the APDU buffer
+            mBuffer = buffer;
+        } else {
+            mBuffer = null;
+        }
         mStatusWords[0] = off;
         mStatusWords[1] = (short)(off + length);
     }
