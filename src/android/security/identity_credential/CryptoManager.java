@@ -51,7 +51,7 @@ public class CryptoManager {
 
     private static final short TEMP_BUFFER_SIZE = 128;
     
-    private static final byte AES_GCM_KEY_SIZE = 32;
+    private static final byte AES_GCM_KEY_SIZE = 16;
     private static final byte AES_GCM_IV_SIZE = 12;
     private static final byte AES_GCM_TAG_SIZE = 16;
     private static final byte EC_KEY_SIZE = 32;
@@ -105,16 +105,16 @@ public class CryptoManager {
         // Secure Random number generation for HBK
         mRandomData = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
         mRandomData.generateData(mTempBuffer, (short)0, AES_GCM_KEY_SIZE);
-        mHBK = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_256, false);
+        mHBK = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_128, false);
         mHBK.setKey(mTempBuffer, (short)0);
         
         // Overwrite this new HBK key in the buffer and initialize a test key 
         Util.arrayFillNonAtomic(mTempBuffer, (short) 0, AES_GCM_KEY_SIZE, (byte) 0);
-        mTestKey = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_256, false);
+        mTestKey = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_128, false);
         mTestKey.setKey(mTempBuffer, (short)0);
 
         // Create the storage key instance 
-        mCredentialStorageKey = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES_TRANSIENT_DESELECT, KeyBuilder.LENGTH_AES_256, false);
+        mCredentialStorageKey = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES_TRANSIENT_DESELECT, KeyBuilder.LENGTH_AES_128, false);
         
         // Configure key pair for elliptic curve key generation
         mCredentialECKeyPair = new KeyPair(
@@ -181,6 +181,10 @@ public class CryptoManager {
         }
     }
 
+    public short getAESKeySize() {
+        return (short)(AES_GCM_KEY_SIZE*8);
+    }
+    
     /**
      * Process the CREATE EPHEMERAL KEY command
      */
@@ -248,7 +252,7 @@ public class CryptoManager {
                 + AES_GCM_IV_SIZE
                 + AES_GCM_KEY_SIZE + EC_KEY_SIZE + AES_GCM_TAG_SIZE));
 
-        // Generate the AES-256 storage key 
+        // Generate the AES-128 storage key 
         mRandomData.generateData(mTempBuffer, (short) 0, AES_GCM_KEY_SIZE);
         mCredentialStorageKey.setKey(mTempBuffer, (short) 0);
 
@@ -713,4 +717,5 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
+
 }

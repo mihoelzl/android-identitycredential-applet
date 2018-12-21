@@ -113,7 +113,7 @@ public class APDUManager {
             return false;
         }
         
-        // More APDUs coming, store the full data (e.g. picture) in EEPROM 
+        // More APDUs coming, store the full data (e.g. picture) in flash 
         if (apdu.isCommandChainingCLA()) {
             if (!ICUtil.getBit(mStatusFlags, FLAG_APDU_RECEIVE_MOREDATA)) {
                 // First command

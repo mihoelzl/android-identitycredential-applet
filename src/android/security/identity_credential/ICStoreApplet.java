@@ -54,16 +54,17 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
     public void process(APDU apdu) {
         byte[] buf = apdu.getBuffer();
-        
-        if (this.selectingApplet()) {
-            mAPDUManager.reset();
-            mCryptoManager.reset();
-            return;
-        }
 
         if (!mAPDUManager.process(apdu)) {
             return;
         }
+
+        if (this.selectingApplet()) {
+            mCryptoManager.reset();
+            processSelectApplet(apdu);
+            return;
+        }
+
 
         if (apdu.isISOInterindustryCLA()) {
             switch (buf[ISO7816.OFFSET_INS]) {
@@ -163,6 +164,20 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         mAPDUManager.setOutgoingLength(outLength);
     }
 
+    /**
+     * Return hardware configuration in the select applet command
+     */
+    private void processSelectApplet(APDU apdu){
+        mAPDUManager.setOutgoing();
+        byte[] outBuff = mAPDUManager.getSendBuffer();
+        Util.setShort(outBuff, (short)0, (short) apdu.getBuffer().length);
+        Util.setShort(outBuff, (short)2, APDUManager.MAXCHUNKSIZE);
+        Util.setShort(outBuff, (short)4, mCryptoManager.getAESKeySize());
+
+        mAPDUManager.setOutgoingLength((short) 6);
+        mAPDUManager.sendAll();
+    }
+    
     private void processGetEntry() {
         
     }
