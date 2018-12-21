@@ -51,7 +51,7 @@ public class CryptoManager {
 
     private static final short TEMP_BUFFER_SIZE = 128;
     
-    private static final byte AES_GCM_KEY_SIZE = 16;
+    private static final byte AES_GCM_KEY_SIZE = 24; //TODO: check why we cannot use AES-128
     private static final byte AES_GCM_IV_SIZE = 12;
     private static final byte AES_GCM_TAG_SIZE = 16;
     private static final byte EC_KEY_SIZE = 32;
@@ -249,8 +249,7 @@ public class CryptoManager {
         mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_CREDENTIALDATA, (short)0, (short) ICConstants.CBOR_MAPKEY_CREDENTIALDATA.length); 
 
         short outOffset = mCBOREncoder.startByteString((short) (5 // CBOR structure with 5 bytes = 1 array start + 2 STK bstr + 2 CRK bstr   
-                + AES_GCM_IV_SIZE
-                + AES_GCM_KEY_SIZE + EC_KEY_SIZE + AES_GCM_TAG_SIZE));
+                + AES_GCM_IV_SIZE + AES_GCM_KEY_SIZE + EC_KEY_SIZE + AES_GCM_TAG_SIZE));
 
         // Generate the AES-128 storage key 
         mRandomData.generateData(mTempBuffer, (short) 0, AES_GCM_KEY_SIZE);
@@ -356,6 +355,7 @@ public class CryptoManager {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
         } catch(CryptoException e) {
+            receiveBuffer[0] = (byte) e.getReason();
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
     }
