@@ -31,20 +31,20 @@ public class APDUManager {
     // TODO: change it to larger size for, e.g. pictures (0x1000)
     public static final short MAXCHUNKSIZE = 0x200; 
 
-    private static final short VALUE_OUTGOING_EXPECTED_LENGTH = 0;
-    private static final short VALUE_OUTGOING_LENGTH = 1;
-    private static final short VALUE_OUTGOING_DATA_SENT = 2;
-    private static final short VALUE_INCOMING_LENGTH = 3;
-    private static final short VALUE_INCOMING_DATA_OFFSET = 4;
-    private static final short STATUS_VALUES_SIZE = 5;
+    private static final byte VALUE_OUTGOING_EXPECTED_LENGTH = 0;
+    private static final byte VALUE_OUTGOING_LENGTH = 1;
+    private static final byte VALUE_OUTGOING_DATA_SENT = 2;
+    private static final byte VALUE_INCOMING_LENGTH = 3;
+    private static final byte VALUE_INCOMING_DATA_OFFSET = 4;
+    private static final byte STATUS_VALUES_SIZE = 5;
 
-    private static final short FLAG_APDU_OUTGOING = 0;
-    private static final short FLAG_APDU_OUTGOING_MOREDATA = 1;
-    private static final short FLAG_APDU_OUTGOING_LARGEBUFFER = 2;
-    private static final short FLAG_APDU_RECEIVED = 3;
-    private static final short FLAG_APDU_RECEIVE_MOREDATA = 4;
-    private static final short FLAG_APDU_RECEIVED_LARGEBUFFER = 5;
-    private static final short STATUS_FLAGS_SIZE = 1;
+    private static final byte FLAG_APDU_OUTGOING = 0;
+    private static final byte FLAG_APDU_OUTGOING_MOREDATA = 1;
+    private static final byte FLAG_APDU_OUTGOING_LARGEBUFFER = 2;
+    private static final byte FLAG_APDU_RECEIVED = 3;
+    private static final byte FLAG_APDU_RECEIVE_MOREDATA = 4;
+    private static final byte FLAG_APDU_RECEIVED_LARGEBUFFER = 5;
+    private static final byte STATUS_FLAGS_SIZE = 1;
 
     private final byte[] mStatusFlags;
     private final short[] mStatusValues;

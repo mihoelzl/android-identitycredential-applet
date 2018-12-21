@@ -90,6 +90,8 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             case ISO7816.INS_ICS_GET_ATTESTATION_CERT:
                 mCryptoManager.process();
                 break;
+            case ISO7816.INS_ICS_AUTHENTICATE:
+                processAuthenticate();
             case ISO7816.INS_ICS_GET_ENTRY:
                 processGetEntry();
                 break;
@@ -165,7 +167,8 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     }
 
     /**
-     * Return hardware configuration in the select applet command
+     * Process the select command and return hardware configuration in the select
+     * applet command.
      */
     private void processSelectApplet(APDU apdu){
         mAPDUManager.setOutgoing();
@@ -178,10 +181,53 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         mAPDUManager.sendAll();
     }
     
+    
+    /**
+     * Process the AUTHENTICATE command (validate encrypted access control profiles)
+     */
+    private void processAuthenticate() {
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
+        
+        short p1p2 =Util.getShort(receiveBuffer, ISO7816.OFFSET_P1);
+        
+        if(p1p2 == 0x0) { // No authentication, just 
+            
+        } else if(p1p2 == 0x1) { // Reader authentication
+
+        } else if (p1p2 == 0x2) { // User authentication
+        } else {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+
+        }
+    }
+
+    private void processLoadAccessControlProfile() {
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
+        
+        if (Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x0) { 
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+        
+        mAPDUManager.setOutgoing();
+
+        mCBORDecoder.init(receivingLength, receivingLength);
+        
+        if(mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY) == 2) {
+            
+        }
+    }
+    
     private void processGetEntry() {
         
     }
     
+    /**
+     * Process the GET VERSION command and return the currrent applet version
+     */
     private void processGetVersion() {
         final byte[] inBuffer = APDU.getCurrentAPDUBuffer();
 
