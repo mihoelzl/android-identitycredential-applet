@@ -42,14 +42,13 @@ public class CryptoManager {
     private static final byte FLAG_CREDENIAL_PERSONALIZING_ENTRIES = 4;
     private static final byte STATUS_FLAGS_SIZE = 1;
 
+    private static final short TEMP_BUFFER_SIZE = 128;
 
     private static final byte STATUS_PROFILES_TOTAL = 0;
     private static final byte STATUS_PROFILES_PERSONALIZED = 1;
     private static final byte STATUS_ENTRIES_TOTAL = 2;
     private static final byte STATUS_ENTRIES_PERSONALIZED = 3;
     private static final byte STATUS_WORDS = 4;
-
-    private static final short TEMP_BUFFER_SIZE = 128;
     
     private static final byte AES_GCM_KEY_SIZE = 16; 
     private static final byte AES_GCM_IV_SIZE = 12;
@@ -99,9 +98,10 @@ public class CryptoManager {
 
     public CryptoManager(APDUManager apduManager, CBORDecoder decoder, CBOREncoder encoder) {
         mTempBuffer = JCSystem.makeTransientByteArray((short)TEMP_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
+
         mStatusFlags = JCSystem.makeTransientByteArray((short)(STATUS_FLAGS_SIZE), JCSystem.CLEAR_ON_DESELECT);
         mStatusWords = JCSystem.makeTransientShortArray(STATUS_WORDS, JCSystem.CLEAR_ON_DESELECT);
-
+        
         // Secure Random number generation for HBK
         mRandomData = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
         mRandomData.generateData(mTempBuffer, (short)0, AES_GCM_KEY_SIZE);
@@ -670,6 +670,13 @@ public class CryptoManager {
                 CryptoBaseX.AES_GCM_TAGLEN_128)); 
     }
 
+    public boolean verifyEphemeralKey(byte[] ephKey, short offset, short length) {
+        assertInitializedEphemeralKeys();
+        
+        ((ECPublicKey)mEphemeralKeyPair.getPublic()).getW(mTempBuffer, (short)0);
+        return Util.arrayCompare(ephKey, offset, mTempBuffer, (short)0, length) == 0;
+    }
+    
     public void createSigningKeyAndWrap(byte[] outSigningBlob, short outOffset) {
         //TODO: implement
     }

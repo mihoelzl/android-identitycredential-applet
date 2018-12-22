@@ -20,7 +20,6 @@ package android.security.identity_credential;
 import javacard.framework.APDU;
 import javacard.framework.Applet;
 import javacard.framework.ISOException;
-import javacard.framework.JCSystem;
 import javacard.framework.Util;
 import javacardx.apdu.ExtendedLength;
 
@@ -28,7 +27,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
     // Version identifier of this Applet
     public static final byte[] VERSION = { (byte) 0x00, (byte) 0x01, (byte) 0x03 };
-
+    
     private final APDUManager mAPDUManager;
 
     private final CryptoManager mCryptoManager;
@@ -37,7 +36,9 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
     private final CBOREncoder mCBOREncoder;
     
-    private ICStoreApplet() {
+    private final AccessControlManager mAccessControlManager;
+    
+    private ICStoreApplet() {       
         mCBORDecoder = new CBORDecoder();
         
         mCBOREncoder = new CBOREncoder();
@@ -45,6 +46,8 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         mAPDUManager = new APDUManager();
 
         mCryptoManager = new CryptoManager(mAPDUManager, mCBORDecoder, mCBOREncoder);
+
+        mAccessControlManager = new AccessControlManager(mCryptoManager);
     }
     
 
@@ -61,6 +64,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
         if (this.selectingApplet()) {
             mCryptoManager.reset();
+            mAccessControlManager.reset();
             processSelectApplet(apdu);
             return;
         }
@@ -81,17 +85,24 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
                 processGetVersion();
                 break;
             case ISO7816.INS_ICS_CREATE_CREDENTIAL:
-            case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
+            case ISO7816.INS_ICS_LOAD_CREDENTIAL_BLOB:
             case ISO7816.INS_ICS_CREATE_EPHEMERAL_KEY:
+                // Make sure the access control is reseted:
+                // Whenever a new credential is loaded, authentication will have to happen again
+                mAccessControlManager.reset();
+            case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
             case ISO7816.INS_ICS_PERSONALIZE_ACCESS_CONTROL:
             case ISO7816.INS_ICS_PERSONALIZE_ATTRIBUTE:
             case ISO7816.INS_ICS_SIGN_PERSONALIZED_DATA:
-            case ISO7816.INS_ICS_LOAD_CREDENTIAL_BLOB:
             case ISO7816.INS_ICS_GET_ATTESTATION_CERT:
                 mCryptoManager.process();
                 break;
             case ISO7816.INS_ICS_AUTHENTICATE:
                 processAuthenticate();
+                break;
+            case ISO7816.INS_ICS_LOAD_ACCESS_CONTROL_PROFILE:
+                processLoadAccessControlProfile();
+                break;
             case ISO7816.INS_ICS_GET_ENTRY:
                 processGetEntry();
                 break;
@@ -192,14 +203,30 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         
         short p1p2 =Util.getShort(receiveBuffer, ISO7816.OFFSET_P1);
         
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
+        short len = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
         if(p1p2 == 0x0) { // No authentication, just 
+            mAccessControlManager.authenticationDone();
+        } else if(p1p2 == 0x1 && len == 2) { // Reader authentication
+            short transcriptLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+            short transcriptOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
+            short readerSignLen= mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+            short readerSignOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
             
-        } else if(p1p2 == 0x1) { // Reader authentication
+            if(!mAccessControlManager.authenticateReader(receiveBuffer, transcriptOffset, transcriptLen, receiveBuffer, readerSignOffset, readerSignLen)) {
+                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
+            mAccessControlManager.authenticationDone();
+        } else if (p1p2 == 0x2 && len == 1) { // User authentication
+            len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+            short tokenOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
 
-        } else if (p1p2 == 0x2) { // User authentication
+            if (!mAccessControlManager.authenticateUser(receiveBuffer, tokenOffset, len)) {
+                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
+            mAccessControlManager.authenticationDone();
         } else {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
-
         }
     }
 
