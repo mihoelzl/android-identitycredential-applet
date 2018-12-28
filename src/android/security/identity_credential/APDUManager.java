@@ -268,6 +268,12 @@ public class APDUManager {
     public short setOutgoing(boolean largeBuffer) {
         APDU apdu = APDU.getCurrentAPDU();
         mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH] = apdu.setOutgoing();
+        
+        // When none is given, use APDU block size
+        if(mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH] == 0) {
+            mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH] = APDU.getOutBlockSize();
+        }
+        
         ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING, true);
         ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING_LARGEBUFFER, largeBuffer);
 

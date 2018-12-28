@@ -253,10 +253,10 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     }
     
     /**
-     * Process the GET VERSION command and return the currrent applet version
+     * Process the GET VERSION command and return the current Applet version
      */
     private void processGetVersion() {
-        final byte[] inBuffer = APDU.getCurrentAPDUBuffer();
+        final byte[] inBuffer = mAPDUManager.getReceiveBuffer();
 
         if (Util.getShort(inBuffer, ISO7816.OFFSET_P1) != 0x0) {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
@@ -269,12 +269,8 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         }
 
-        short outLength = 0;
-        try {
-            outLength = Util.arrayCopyNonAtomic(VERSION, (short) 0, outBuffer, outLength, (short) VERSION.length);
-        } catch (ArrayIndexOutOfBoundsException e) {
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
-        }
+        short outLength = Util.arrayCopyNonAtomic(VERSION, (short) 0, outBuffer, (short) 0, (short) VERSION.length);
+
         mAPDUManager.setOutgoingLength(outLength);
     }
     
