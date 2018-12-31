@@ -1,6 +1,9 @@
 selectApplet
 
 /send 8050000000
+/send 8050000000
+/send 8050000000
+/send 8050000000
 
 
 #/close

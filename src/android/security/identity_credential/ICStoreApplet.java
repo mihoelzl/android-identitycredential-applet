@@ -92,9 +92,10 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
                 mAccessControlManager.reset();
             case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
             case ISO7816.INS_ICS_PERSONALIZE_ACCESS_CONTROL:
+            case ISO7816.INS_ICS_PERSONALIZE_NAMESPACE:
             case ISO7816.INS_ICS_PERSONALIZE_ATTRIBUTE:
             case ISO7816.INS_ICS_SIGN_PERSONALIZED_DATA:
-            case ISO7816.INS_ICS_GET_ATTESTATION_CERT:
+            case ISO7816.INS_ICS_GET_ATTESTATION_CERT:        
                 mCryptoManager.process();
                 break;
             case ISO7816.INS_ICS_AUTHENTICATE:
