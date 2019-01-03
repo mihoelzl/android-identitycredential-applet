@@ -500,6 +500,7 @@ public class CryptoManager {
             
             encryptCredentialData(receiveBuffer, dataOffset, dataLength, receiveBuffer, addDataOffset, addDataLength,
                     outBuffer, outOffset);
+            mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
             
             // Add entry to signature
             // Signature is structured as Map = { "name" : tstr, 
@@ -521,8 +522,6 @@ public class CryptoManager {
                     (short) ICConstants.CBOR_MAPKEY_DIRECTLYAVAILABLE.length);
             mCBOREncoder.encodeBoolean(directlyAvailable);
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
-            
-            mAPDUManager.setOutgoingLength(mCBORDecoder.getCurrentOffset());
         }
 
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE]++;
