@@ -1,0 +1,67 @@
+#
+# Copyright 2019, The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+/set-var -g apduSize 510
+/set-var -g APPLETID F0|IdCredential|0001
+
+DEFUN sendDataInChain GLOBAL
+    ins=${argv[0]}
+    p1=${argv[1]}
+    p2=${argv[2]}
+    data=${argv[3]}
+    expReturn=${argv[4]}
+    nrOfChains=$(/expr ${data;l} / ${apduSize})
+    
+    # Make sure that we have enough blocks
+    if $(/expr ${data;l} % ${apduSize}) != 0
+        nrOfChains=$(/expr ${nrOfChains} + 1)
+    end
+
+    i=0
+    
+    while ${i} < $(/expr ${nrOfChains} - 1)
+        /set-var dataBlock ${data;s$(/expr ${i} * ${apduSize}),${apduSize}}
+        /send 90${ins}${p1}${p2}#(${dataBlock})00 *${expReturn}    
+        /set-var i $(/expr ${i} + 1)
+    end
+    
+    /set-var dataBlock ${data;s$(/expr ${i} * ${apduSize}),${apduSize}}
+    /send 80${ins}${p1}${p2}#(${dataBlock})00 
+    
+    if ${response;s$(/expr ${response;l} - 4),4} != '6100' && ${response;s$(/expr ${response;l} - 4),4} != ${expReturn}
+        /error "Invalid status word" 
+    end
+    
+    result=${response;s0,$(/expr ${response;l} - 4)} 
+    while ${response;s$(/expr ${response;l} - 4),4} == '6100'
+        /send 00C0000000
+        result=${result}${response;s0,$(/expr ${response;l} - 4)}
+        
+        if ${response;s$(/expr ${response;l} - 4),4} != '6100' && ${response;s$(/expr ${response;l} - 4),4} != ${expReturn}
+            /error "Invalid status word" 
+        end
+    end
+    
+    return ${result}
+END
+
+DEFUN selectApplet GLOBAL
+    /terminal
+    /mode trace=on
+    /atr
+    
+    /select ${APPLETID}
+END

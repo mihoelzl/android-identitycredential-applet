@@ -1,7 +1,0 @@
-/terminal
-/mode trace=on
-/atr
-
-/set-var -g APPLETID F0|IdCredential|0001
-
-/select ${APPLETID}

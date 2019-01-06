@@ -1,3 +1,4 @@
+helperFunctions
 selectApplet
 
 /send 80530000#(64|test|)00 64746573749000
