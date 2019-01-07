@@ -1,6 +1,6 @@
 /*
 **
-** Copyright 2018, The Android Open Source Project
+** Copyright 2019, The Android Open Source Project
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -49,14 +49,15 @@ public class CryptoManager {
     private static final byte STATUS_PROFILES_PERSONALIZED = 1;
     private static final byte STATUS_ENTRIES_IN_NAMESPACE_TOTAL = 2;
     private static final byte STATUS_ENTRIES_IN_NAMESPACE = 3;
-    private static final byte STATUS_NAMESPACES_PERSONALIZED = 4;
-    private static final byte STATUS_NAMESPACES_TOTAL = 5;
-    private static final byte STATUS_WORDS = 6;
+    private static final byte STATUS_ENTRY_ADDDATA_LENGTH = 4;
+    private static final byte STATUS_NAMESPACES_PERSONALIZED = 5;
+    private static final byte STATUS_NAMESPACES_TOTAL = 6;
+    private static final byte STATUS_WORDS = 7;
     
-    private static final byte AES_GCM_KEY_SIZE = 16; 
-    private static final byte AES_GCM_IV_SIZE = 12;
-    private static final byte AES_GCM_TAG_SIZE = 16;
-    private static final byte EC_KEY_SIZE = 32;
+    public static final byte AES_GCM_KEY_SIZE = 16; 
+    public static final byte AES_GCM_IV_SIZE = 12;
+    public static final byte AES_GCM_TAG_SIZE = 16;
+    public static final byte EC_KEY_SIZE = 32;
     
     // Hardware bound key, initialized during Applet installation
     private final AESKey mHBK;
@@ -67,7 +68,7 @@ public class CryptoManager {
     // Storage key for a credential
     private final AESKey mCredentialStorageKey;
 
-    // KeyPair for credential key generation and storage 
+    // KeyPair for credential key generation 
     private final KeyPair mCredentialECKeyPair;
 
     // KeyPair for ephemeral key generation
@@ -149,6 +150,10 @@ public class CryptoManager {
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, false);
 
+        mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
+        mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL] = 0;
+        mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = 0;
+        
         for (short i = 0; i < STATUS_WORDS; i++) {
             mStatusWords[i] = 0;
         }
@@ -192,7 +197,7 @@ public class CryptoManager {
     }
 
     public short getAESKeySize() {
-        return (short)(AES_GCM_KEY_SIZE*8);
+        return (short) (AES_GCM_KEY_SIZE * 8);
     }
     
     /**
@@ -211,8 +216,8 @@ public class CryptoManager {
             // Create the ephemeral key
             mEphemeralKeyPair.genKeyPair();
             
-            // Keep the ephemeral key in a separate buffer (required for reader authentication)
-            short length = ((ECPublicKey)mEphemeralKeyPair.getPublic()).getW(mTempBuffer, (short) 0);
+            // Keep the ephemeral key in the key object
+            short length = ((ECPublicKey) mEphemeralKeyPair.getPublic()).getW(mTempBuffer, (short) 0);
 
             // Start the CBOR encoding of the output 
             mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
@@ -253,11 +258,13 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
         
-        // Start encoding the output: credentialBlob = { "credentialData" : bstr }
+        // Encoding the output = [ bstr ]
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
-        mCBOREncoder.startMap((short) 1);
-        mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_CREDENTIALDATA, (short)0, (short) ICConstants.CBOR_MAPKEY_CREDENTIALDATA.length); 
+        mCBOREncoder.startArray((short) 2);
 
+        // TODO: need to change this to first signature over auditLogHash
+        mCBOREncoder.encodeBoolean(false); // Placeholder for auditLogHash
+        
         short outOffset = mCBOREncoder.startByteString((short) (4 // CBOR structure with 5 bytes = 1 array start + 1 STK bstr + 2 CRK bstr   
                 + AES_GCM_IV_SIZE + AES_GCM_KEY_SIZE + EC_KEY_SIZE + AES_GCM_TAG_SIZE));
 
@@ -273,6 +280,7 @@ public class CryptoManager {
 
         // Set the Applet in the PERSONALIZATION state
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE, true);
+        
         
         // Return credentialBlob and start signature creation
         try {
@@ -435,9 +443,13 @@ public class CryptoManager {
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, true);
         } 
         
+        // Check that current namespace is already finished with personalization
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE)) {
+            assertStatusFlagSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES); // Verify that namespaces aren't already personalized
+            
             mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
 
+            // Get the number of entries in this namespace
             mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]= mCBORDecoder.readMajorType(CBORBase.TYPE_UNSIGNED_INTEGER);
             
             short namespaceNameLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
@@ -447,13 +459,13 @@ public class CryptoManager {
             mCBOREncoder.encodeTextString(receiveBuffer, namespaceNameOffset, namespaceNameLength);
             mCBOREncoder.startArray(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]);
 
-            // Reset counter for number in current namespace 
+            // Reset counter for the number of entries in current namespace 
             mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
             
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, true);
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
         } else {
-            ISOException.throwIt(ISO7816.SW_COMMAND_NOT_ALLOWED);
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
     /**
@@ -464,6 +476,7 @@ public class CryptoManager {
         assertInPersonalizationState();
         assertStatusFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_PROFILES);
         assertStatusFlagSet(FLAG_CREDENIAL_PERSONALIZING_NAMESPACE);
+        assertStatusFlagSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES);
             
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
@@ -476,65 +489,113 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);  // Not implemented yet   
         }    
 
-        mAPDUManager.setOutgoing();
+        mAPDUManager.setOutgoing(true);
         byte[] outBuffer = mAPDUManager.getSendBuffer();
         
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
 
-        if(mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY) == 2) {
-            // Receiving data is encoded as array = [Data, AdditionalData]
-            // Read the entry. 
-            // Get the current offset (data entry begin)
-            short dataOffset = mCBORDecoder.getCurrentOffset();
-            // Skip the actual content (data entry) and get the length of it
-            short dataLength = (short) (mCBORDecoder.skipEntry() - dataOffset);
+        byte entryStatus = (byte) (receiveBuffer[ISO7816.OFFSET_P1] & 0x7); // Get status of entry personalization
+
+        if (entryStatus == 0x0) { // Start entry: Additional data in command data
+            // AdditionalData is encoded as map {namespace, name, accessControlProfileIds}
 
             // Read additional data (used for authentication data in AES-GCM)
             short addDataOffset = mCBORDecoder.getCurrentOffset();
-            // Skip the actual content (the additional data) and get the length of it
-            short addDataLength = (short)(mCBORDecoder.skipEntry() - addDataOffset);            
             
-            // Encode output
-            short outOffset = mCBOREncoder.startByteString((short) (dataLength + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
-            
-            encryptCredentialData(receiveBuffer, dataOffset, dataLength, receiveBuffer, addDataOffset, addDataLength,
-                    outBuffer, outOffset);
-            mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
-            
-            // Add entry to signature
-            // Signature is structured as Map = { "name" : tstr, 
+            // Add beginning of entry to signature
+            // Entry in signature is structured as Map = { "name" : tstr, 
             //           "accessControlProfiles" : [ *uint],
             //           "value" : bstr / tstr / int / bool,
             //           "directlyAvailable" : bool }
+            
+            // Get name and accesscontrolProfileIds from addData 
+            mCBORDecoder.readMajorType(CBORBase.TYPE_MAP);
+            
+            mCBORDecoder.skipEntry(); // Skip "namespace"
+            short nameOffset = mCBORDecoder.getCurrentOffset();
+            mCBORDecoder.skipEntry(); // Skip "name"
+            short nameAndACPLength = (short) (mCBORDecoder.skipEntry() - nameOffset); // Skip "accessControlProfileIds"            
+
+            // Get the complete length of the CBOR map
+            short addDataLength = (short)(mCBORDecoder.getCurrentOffset() - addDataOffset);            
+            
+            // Add  {"name" : tstr, "accessControlProfiles" : [ *uint] to signature, "value" : ...}
             mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
             mCBOREncoder.startMap((short) 4);
 
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
-            // add the additional data ("name" : bstr, "accessControlProfiles" : [ *uint]) 
-            mECSignature.update(receiveBuffer, (short) (addDataOffset + 1), (short) (addDataLength - 1));
-            // add the data entry to signature ( bstr / tstr / int / bool )
-            mECSignature.update(receiveBuffer, (short) (dataOffset + 1), (short) (dataLength - 1));
+            mECSignature.update(receiveBuffer, nameOffset, nameAndACPLength);
             
+            mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+            mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_VALUE, (short) 0, (short) ICConstants.CBOR_MAPKEY_VALUE.length);
+            
+            // add map key "value" to the signature
+            mECSignature.update(mTempBuffer, (short) 0, (short) mCBOREncoder.getCurrentOffset());
+            // add entrySize
+            
+            // Remember the whole additional data field for the data entry encryption 
+            mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = Util.arrayCopyNonAtomic(receiveBuffer, addDataOffset, mTempBuffer, (short) 0, addDataLength);
+            
+            // Encode output
+            //short outOffset = mCBOREncoder.startByteString((short) (dataLength + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
+        } else { // Entry value in command data : encrypt and return 
+            // Additional data needs to be sent first
+            if(mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] == 0) {
+                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); 
+            }
+            
+            // EntryValue is encoded as CBOR value tstr / bstr / int / bool
+            short dataOffset = mCBORDecoder.getCurrentOffset();
+            
+            // Length of the complete APDU
+            short dataLength = mAPDUManager.getReceivingLength();            
+
+            if ((entryStatus & 0x2) == 0x2) {
+                // A chunk "inbetween": Do NOT add type and length to signature
+                
+                // Read length information (move offset to actual data)  
+                mCBORDecoder.readLength();
+                dataLength -= mCBORDecoder.getCurrentOffset() - dataOffset;
+                dataOffset = mCBORDecoder.getCurrentOffset();
+            }
+            
+            // Add entry to signature before encryption (same buffer might be used for receiving and sending)
+            mECSignature.update(receiveBuffer, dataOffset, dataLength);
+            
+            // Encrypt and return
+            short len = encryptCredentialData(receiveBuffer, inOffset, mAPDUManager.getReceivingLength(), mTempBuffer, (short) 0,
+                    mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH], outBuffer, (short) 0);
+            
+            mAPDUManager.setOutgoingLength(len);
+        }
+        
+        
+        // If first bit is set: this command was the last (or only) chunk
+        if ((entryStatus & 0x1) == 0x1) {
             // Add directly available bit information ("directlyAvailable" : bool) 
             mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
             mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_DIRECTLYAVAILABLE, (short) 0,
                     (short) ICConstants.CBOR_MAPKEY_DIRECTLYAVAILABLE.length);
             mCBOREncoder.encodeBoolean(directlyAvailable);
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+        
+            mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = 0; // Reset entry information
+            
+            mStatusWords[STATUS_ENTRIES_IN_NAMESPACE]++;
+            if(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] == mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]) {
+                // Finished with personalization of this namespace
+                ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, false);
+                
+                mStatusWords[STATUS_NAMESPACES_PERSONALIZED]++;
+                
+                if(mStatusWords[STATUS_NAMESPACES_PERSONALIZED] == mStatusWords[STATUS_NAMESPACES_TOTAL]) {
+                    // All namespaces personalized
+                    ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, false);
+                }
+            } 
         }
 
-        mStatusWords[STATUS_ENTRIES_IN_NAMESPACE]++;
-        if(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] == mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]) {
-            // Finished with entry personalization
-            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, false);
-            
-            mStatusWords[STATUS_NAMESPACES_PERSONALIZED]++;
-            
-            if(mStatusWords[STATUS_NAMESPACES_PERSONALIZED] == mStatusWords[STATUS_NAMESPACES_TOTAL]) {
-                ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, false);
-            }
-        } 
     }
     
     /**
@@ -577,7 +638,6 @@ public class CryptoManager {
 
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
-
         
         short profileLength = 0, profileOffset = 0;
         short encodedLocation = 0;
@@ -597,7 +657,7 @@ public class CryptoManager {
                 receiveBuffer, profileOffset, profileLength, // Profile as auth data 
                 outBuffer, encodedLocation); // Output data
         
-        mStatusWords[STATUS_PROFILES_PERSONALIZED] ++;
+        mStatusWords[STATUS_PROFILES_PERSONALIZED]++;
         if(mStatusWords[STATUS_PROFILES_PERSONALIZED] == mStatusWords[STATUS_PROFILES_TOTAL]) {
             // Finished with profile personalization
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);

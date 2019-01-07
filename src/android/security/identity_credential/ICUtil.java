@@ -1,6 +1,6 @@
 /*
 **
-** Copyright 2018, The Android Open Source Project
+** Copyright 2019, The Android Open Source Project
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@ public class ICUtil {
         short byteIndex = (short) (flag >>> (short) 3);
         byte bitMask = (byte) ((byte) 1 << (short) (flag & (short) 0x0007));
         if (value) {
-            bitField[byteIndex] ^= bitMask;
+            bitField[byteIndex] |= bitMask;
         } else {
             bitField[byteIndex] &= ~bitMask;
         }

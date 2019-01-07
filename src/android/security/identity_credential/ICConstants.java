@@ -18,11 +18,6 @@
 package android.security.identity_credential;
 
 public class ICConstants {
-
-    public static final byte[] CBOR_MAPKEY_CREDENTIALDATA = new byte[] { (byte) 0x63, (byte) 0x72, (byte) 0x65,
-            (byte) 0x64, (byte) 0x65, (byte) 0x6E, (byte) 0x74, (byte) 0x69, (byte) 0x61, (byte) 0x6C, (byte) 0x44,
-            (byte) 0x61, (byte) 0x74, (byte) 0x61 };
-
     public static final byte[] CBOR_MAPKEY_DOCTYPE = new byte[] { (byte) 0x64, (byte) 0x6F, (byte) 0x63,
             (byte) 0x54, (byte) 0x79, (byte) 0x70, (byte) 0x65 };
 
@@ -44,4 +39,7 @@ public class ICConstants {
     public static final byte[] CBOR_MAPKEY_DIRECTLYAVAILABLE = new byte[] { 0x64, (byte) 0x69, (byte) 0x72, (byte) 0x65,
             (byte) 0x63, (byte) 0x74, (byte) 0x6c, (byte) 0x79, (byte) 0x41, (byte) 0x76, (byte) 0x61, (byte) 0x69,
             (byte) 0x6c, (byte) 0x61, (byte) 0x62, (byte) 0x6c, (byte) 0x65 };
+    
+    public static final byte[] CBOR_MAPKEY_VALUE = new byte[] { (byte) 0x76, (byte) 0x61, (byte) 0x6c, (byte) 0x75,
+            (byte) 0x65 };
 }

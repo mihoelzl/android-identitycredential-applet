@@ -21,6 +21,7 @@ import javacard.framework.APDU;
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
 import javacard.framework.Util;
+import javacardx.framework.math.BigNumber;
 
 public class CBORDecoder extends CBORBase{
 
@@ -63,7 +64,12 @@ public class CBORDecoder extends CBORBase{
         switch(getMajorType()) {
         case TYPE_UNSIGNED_INTEGER:
         case TYPE_NEGATIVE_INTEGER:
-            increaseOffset(getIntegerSize());
+            short size = getIntegerSize();
+            if (size == 1) { // Make sure one byte integers are handled correctly
+                readInt8(); // Increases by 1 (one byte encoded int) or 2 bytes 
+            } else {
+                increaseOffset((short) (1 + size));
+            }
             break;
         case TYPE_TEXT_STRING:
         case TYPE_BYTE_STRING:
@@ -162,6 +168,17 @@ public class CBORDecoder extends CBORBase{
         } else { 
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
+    }
+    
+    public short readEncodedInteger(byte[] output, short offset) {
+        final byte size = getIntegerSize();
+        if(size == 1) { // Check for special case (integer could be encoded in first type)
+            output[offset] = readInt8();
+        } else {
+            Util.arrayCopyNonAtomic(getBuffer(), getCurrentOffsetAndIncrease((short) (1 + size)), output,
+                    (short) (offset), (short) size);
+        }
+        return size;
     }
 
     public short readLength() {

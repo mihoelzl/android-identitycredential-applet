@@ -1,6 +1,6 @@
 /*
 **
-** Copyright 2018, The Android Open Source Project
+** Copyright 2019, The Android Open Source Project
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -29,8 +29,9 @@ public class APDUManager {
     
     // Buffer size for large incoming/outgoing traffic. 
     // TODO: change it to larger size for, e.g. pictures (0x1000)
-    public static final short MAXCHUNKSIZE = 0x200; 
-
+    public static final short MAXCHUNKSIZE = (short) 8*0xFF; // For APDU chaining: multiple of APDU size 
+    private static final short LARGEBUFFERSIZE = MAXCHUNKSIZE + 5; // APDU_HEADER_SIZE = 5;
+    
     private static final byte VALUE_OUTGOING_EXPECTED_LENGTH = 0;
     private static final byte VALUE_OUTGOING_LENGTH = 1;
     private static final byte VALUE_OUTGOING_DATA_SENT = 2;
@@ -51,11 +52,12 @@ public class APDUManager {
     private final byte[] mLargeSendAndRecvBuffer;
     private byte[] mSendBuffer;
 
-    public APDUManager() {
+    public APDUManager(byte cryptoHeaderOverhead) {
         mStatusValues = JCSystem.makeTransientShortArray(STATUS_VALUES_SIZE, JCSystem.CLEAR_ON_DESELECT);
         mStatusFlags = JCSystem.makeTransientByteArray(STATUS_FLAGS_SIZE, JCSystem.CLEAR_ON_DESELECT);
         
-        mLargeSendAndRecvBuffer = JCSystem.makeTransientByteArray(MAXCHUNKSIZE, JCSystem.CLEAR_ON_DESELECT);
+        mLargeSendAndRecvBuffer = JCSystem.makeTransientByteArray((short) (LARGEBUFFERSIZE + cryptoHeaderOverhead),
+                JCSystem.CLEAR_ON_DESELECT);
     }
 
     /**
@@ -67,6 +69,10 @@ public class APDUManager {
         mStatusValues[VALUE_INCOMING_LENGTH] = 0;
         mStatusValues[VALUE_INCOMING_DATA_OFFSET] = 0;
         mStatusValues[VALUE_OUTGOING_DATA_SENT] = 0;
+
+        ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING_MOREDATA, false);
+        ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING_LARGEBUFFER, false);
+        ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVE_MOREDATA, false);
     }
 
     /**
@@ -129,11 +135,14 @@ public class APDUManager {
             return false;  
         } else if(ICUtil.getBit(mStatusFlags, FLAG_APDU_RECEIVE_MOREDATA)) {
             // Last command in chain
-            receiveAll();
-            ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVE_MOREDATA, false);
-            ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED_LARGEBUFFER, true);
+            try {
+                receiveAll();
+            } finally {
+                ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVE_MOREDATA, false);
+                ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED_LARGEBUFFER, true);
+            }
         } else {
-            // No data has been processed, reset the internal state
+            // No previous data has been processed, reset the internal state 
             reset();
             
             ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING_LARGEBUFFER, false);
@@ -229,7 +238,7 @@ public class APDUManager {
                 
                 // New offset = general data offset + already received data
                 short newDataOffset = (short) (receiveOffset + getReceivingLength()); 
-                if ((short) (newDataOffset + bytesReceived) > MAXCHUNKSIZE) {
+                if ((short) (newDataOffset + bytesReceived) > LARGEBUFFERSIZE) {
                     ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
                 }
                 
@@ -259,7 +268,7 @@ public class APDUManager {
     /**
      * Set the outgoing flag, indicating that data is returned to the sender
      * 
-     * @param largeBuffer Use the large EEPROM buffer for outgoing traffic. Note:
+     * @param largeBuffer Use the large buffer for outgoing traffic. Note:
      *                    the caller needs to support a "one buffer" implementation
      *                    for receiving and outgoing data. This method will then
      *                    return the common large buffer.

@@ -1,6 +1,6 @@
 /*
 **
-** Copyright 2018, The Android Open Source Project
+** Copyright 2019, The Android Open Source Project
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ public interface ISO7816 extends javacard.framework.ISO7816 {
      * Instructions for the Identity Credential Store
      */
     public static final byte INS_ICS_GET_VERSION = (byte) 0x50;
+    public static final byte INS_ICS_PING = (byte) 0x51;
     public static final byte INS_ICS_CREATE_EPHEMERAL_KEY = (byte) 0x52;
     public static final byte INS_ICS_TEST_CBOR = (byte) 0x53;
 

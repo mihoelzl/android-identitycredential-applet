@@ -1,6 +1,6 @@
 /*
 **
-** Copyright 2018, The Android Open Source Project
+** Copyright 2019, The Android Open Source Project
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         
         mCBOREncoder = new CBOREncoder();
         
-        mAPDUManager = new APDUManager();
+        mAPDUManager = new APDUManager((byte) (CryptoManager.AES_GCM_IV_SIZE + CryptoManager.AES_GCM_TAG_SIZE));
 
         mCryptoManager = new CryptoManager(mAPDUManager, mCBORDecoder, mCBOREncoder);
 
@@ -83,6 +83,9 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             switch (buf[ISO7816.OFFSET_INS]) {
             case ISO7816.INS_ICS_GET_VERSION:
                 processGetVersion();
+                break;
+            case ISO7816.INS_ICS_PING:
+                processPing();
                 break;
             case ISO7816.INS_ICS_CREATE_CREDENTIAL:
             case ISO7816.INS_ICS_LOAD_CREDENTIAL_BLOB:
@@ -185,14 +188,35 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     private void processSelectApplet(APDU apdu){
         mAPDUManager.setOutgoing();
         byte[] outBuff = mAPDUManager.getSendBuffer();
-        Util.setShort(outBuff, (short)0, (short) apdu.getBuffer().length);
-        Util.setShort(outBuff, (short)2, APDUManager.MAXCHUNKSIZE);
+        Util.setShort(outBuff, (short) 0, (short) apdu.getBuffer().length);
+        Util.setShort(outBuff, (short) 2, APDUManager.MAXCHUNKSIZE);
         Util.setShort(outBuff, (short)4, mCryptoManager.getAESKeySize());
 
         mAPDUManager.setOutgoingLength((short) 6);
         mAPDUManager.sendAll();
     }
-    
+
+    /**
+     * Process incoming PING requests.
+     */
+    private void processPing() {
+        final byte[] inBuffer = mAPDUManager.getReceiveBuffer();
+        
+        short pingType = Util.getShort(inBuffer, ISO7816.OFFSET_P1);
+
+        if (pingType == 0) {
+            // Do nothing
+        } else if (pingType == 1) {
+            // Respond with incoming data
+            final short lc = mAPDUManager.receiveAll();
+            final short le = mAPDUManager.setOutgoing();
+            final byte[] outBuffer = mAPDUManager.getSendBuffer();
+            
+            short outLen = Util.arrayCopyNonAtomic(inBuffer, mAPDUManager.getOffsetIncomingData(), outBuffer, (short)0, ICUtil.min(lc, le));
+            
+            mAPDUManager.setOutgoingLength(outLen);
+        }
+    }
     
     /**
      * Process the AUTHENTICATE command (validate encrypted access control profiles)
