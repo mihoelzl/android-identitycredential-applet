@@ -416,6 +416,9 @@ public class CryptoManager {
         // TODO implement
     }
 
+    /**
+     * Process the PERSONALIZE NAMESPACE command. Throws an exception when namespace was already personalized
+     */
     private void processPersonalizeNamespace() {
         assertInPersonalizationState();
         assertStatusFlagNotSet(FLAG_CREDENIAL_PERSONALIZING_PROFILES);

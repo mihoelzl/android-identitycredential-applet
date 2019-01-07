@@ -49,7 +49,6 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
         mAccessControlManager = new AccessControlManager(mCryptoManager);
     }
-    
 
     public static void install(byte[] bArray, short bOffset, byte bLength) {
         new ICStoreApplet().register(bArray, (short) (bOffset + 1), bArray[bOffset]);
@@ -246,7 +245,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
             short tokenOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
 
-            if (!mAccessControlManager.authenticateUser(receiveBuffer, tokenOffset, len)) {
+            if (!mAccessControlManager.authenticateUser(receiveBuffer, tokenOffset)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             mAccessControlManager.authenticationDone();

@@ -29,10 +29,12 @@ public class AccessControlManager {
     private static final byte VALUE_CURRENT_STATUS = 0;
     private static final byte STATUS_WORDS = 1;
 
-    private static final short TEMPBUFFER_SIZE = 128;
+    private static final byte BUFFERPOS_USERID_LENGTH = 8;
+    
     private static final short BUFFERPOS_READERKEY = 0;
     private static final short BUFFERPOS_USERID = BUFFERPOS_READERKEY + 65;
-    private static final short BUFFERPOS_PROFILEIDS = BUFFERPOS_USERID + 32;
+    private static final short BUFFERPOS_PROFILEIDS = BUFFERPOS_USERID + BUFFERPOS_USERID_LENGTH;
+    private static final short TEMPBUFFER_SIZE = BUFFERPOS_PROFILEIDS + 128;
     
     private final byte[] mStatusWords;
     
@@ -78,10 +80,10 @@ public class AccessControlManager {
         return true;
     }
     
-    public boolean authenticateUser(byte[] authToken, short tokenOffset, short tokenLen) {
+    public boolean authenticateUser(byte[] authToken, short tokenOffset) {
         // TODO: How to we verify the token?
         
-        Util.arrayCopyNonAtomic(authToken, tokenOffset, mTempBuffer, BUFFERPOS_USERID, tokenLen);
+        Util.arrayCopyNonAtomic(authToken, tokenOffset, mTempBuffer, BUFFERPOS_USERID, BUFFERPOS_USERID_LENGTH);
         
         return true;
     }
