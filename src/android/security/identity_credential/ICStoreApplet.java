@@ -47,7 +47,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
 
         mCryptoManager = new CryptoManager(mAPDUManager, mCBORDecoder, mCBOREncoder);
 
-        mAccessControlManager = new AccessControlManager(mCryptoManager);
+        mAccessControlManager = new AccessControlManager(mCryptoManager, mAPDUManager, mCBORDecoder, mCBOREncoder);
     }
 
     public static void install(byte[] bArray, short bOffset, byte bLength) {
@@ -101,10 +101,8 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
                 mCryptoManager.process();
                 break;
             case ISO7816.INS_ICS_AUTHENTICATE:
-                processAuthenticate();
-                break;
             case ISO7816.INS_ICS_LOAD_ACCESS_CONTROL_PROFILE:
-                processLoadAccessControlProfile();
+                mAccessControlManager.process();
                 break;
             case ISO7816.INS_ICS_GET_ENTRY:
                 processGetEntry();
@@ -218,65 +216,6 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     }
     
     /**
-     * Process the AUTHENTICATE command (validate encrypted access control profiles)
-     */
-    private void processAuthenticate() {
-        short receivingLength = mAPDUManager.receiveAll();
-        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
-        short inOffset = mAPDUManager.getOffsetIncomingData();
-        
-        short p1p2 =Util.getShort(receiveBuffer, ISO7816.OFFSET_P1);
-        
-        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
-        short len = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
-        if(p1p2 == 0x0) { // No authentication, just 
-            mAccessControlManager.authenticationDone();
-        } else if(p1p2 == 0x1 && len == 2) { // Reader authentication
-            short transcriptLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            short transcriptOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
-            short readerSignLen= mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            short readerSignOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
-            
-            if(!mAccessControlManager.authenticateReader(receiveBuffer, transcriptOffset, transcriptLen, receiveBuffer, readerSignOffset, readerSignLen)) {
-                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
-            }
-            mAccessControlManager.authenticationDone();
-        } else if (p1p2 == 0x2 && len == 1) { // User authentication
-            len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            short tokenOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
-
-            if (!mAccessControlManager.authenticateUser(receiveBuffer, tokenOffset)) {
-                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
-            }
-            mAccessControlManager.authenticationDone();
-        } else {
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
-        }
-    }
-
-    private void processLoadAccessControlProfile() {
-        short receivingLength = mAPDUManager.receiveAll();
-        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
-        short inOffset = mAPDUManager.getOffsetIncomingData();
-        
-        if (Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x0) { 
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
-        }
-        
-        mAPDUManager.setOutgoing();
-
-        mCBORDecoder.init(receivingLength, receivingLength);
-        
-        if(mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY) == 2) {
-            
-        }
-    }
-    
-    private void processGetEntry() {
-        
-    }
-    
-    /**
      * Process the GET VERSION command and return the current Applet version
      */
     private void processGetVersion() {
@@ -296,6 +235,11 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         short outLength = Util.arrayCopyNonAtomic(VERSION, (short) 0, outBuffer, (short) 0, (short) VERSION.length);
 
         mAPDUManager.setOutgoingLength(outLength);
+    }
+    
+
+    private void processGetEntry() {
+        
     }
     
 }

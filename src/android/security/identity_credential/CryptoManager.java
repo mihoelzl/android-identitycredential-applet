@@ -56,7 +56,7 @@ public class CryptoManager {
     
     public static final byte AES_GCM_KEY_SIZE = 16; 
     public static final byte AES_GCM_IV_SIZE = 12;
-    public static final byte AES_GCM_TAG_SIZE = 16;
+    public static final byte AES_GCM_TAG_SIZE = CryptoBaseX.AES_GCM_TAGLEN_128;
     public static final byte EC_KEY_SIZE = 32;
     
     // Hardware bound key, initialized during Applet installation
@@ -336,7 +336,7 @@ public class CryptoManager {
                 mTempBuffer, (short) 0, (short) 0, // authData empty
                 outCredentialBlob, (short) (outOffset + AES_GCM_IV_SIZE), // Output location
                 outCredentialBlob, (short) (outOffset + AES_GCM_IV_SIZE + dataLength), // Tag output
-                CryptoBaseX.AES_GCM_TAGLEN_128) + AES_GCM_IV_SIZE + CryptoBaseX.AES_GCM_TAGLEN_128); 
+                AES_GCM_TAG_SIZE) + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE); 
     }
 
     /**
@@ -380,12 +380,12 @@ public class CryptoManager {
     
     private boolean unwrapCredentialBlob(AESKey encryptionKey, byte[] credentialBlob, short offset, short length) throws CryptoException{
         short outLen = CryptoBaseX.doFinal(encryptionKey, CryptoBaseX.ALG_AES_GCM, Cipher.MODE_DECRYPT, // Key information
-                credentialBlob, (short) (offset + AES_GCM_IV_SIZE), (short) (length - AES_GCM_IV_SIZE - CryptoBaseX.AES_GCM_TAGLEN_128), // Data
+                credentialBlob, (short) (offset + AES_GCM_IV_SIZE), (short) (length - AES_GCM_IV_SIZE - AES_GCM_TAG_SIZE), // Data
                 credentialBlob, offset, AES_GCM_IV_SIZE, // IV
                 mTempBuffer, (short) 0, (short) 0, // authData empty
                 mTempBuffer, (short) 0, // Output location
-                credentialBlob, (short) (offset + length - CryptoBaseX.AES_GCM_TAGLEN_128), // Tag input
-                CryptoBaseX.AES_GCM_TAGLEN_128); 
+                credentialBlob, (short) (offset + length - AES_GCM_TAG_SIZE), // Tag input
+                AES_GCM_TAG_SIZE); 
         
         mCBORDecoder.init(mTempBuffer, (short) 0, outLen);
         if(mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY) == 2) {
@@ -734,7 +734,7 @@ public class CryptoManager {
                 authData, authDataOffset, authLen, // authData empty
                 outBuffer, (short) (outOffset + AES_GCM_IV_SIZE), // Output location
                 outBuffer, (short) (outOffset + AES_GCM_IV_SIZE + length), // Tag output
-                CryptoBaseX.AES_GCM_TAGLEN_128) + AES_GCM_IV_SIZE + CryptoBaseX.AES_GCM_TAGLEN_128);
+                AES_GCM_TAG_SIZE) + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE);
     }
     
     /**
@@ -743,7 +743,7 @@ public class CryptoManager {
      * 
      * @param encryptedData  Input data that should be decrypted
      * @param offset         Offset in buffer
-     * @param length         Length of data
+     * @param length         Length of data (including iv + tag) 
      * @param authData       Authentication data
      * @param authDataOffset Offset of authentication data in buffer
      * @param authLen        Length of authentication data
@@ -755,15 +755,29 @@ public class CryptoManager {
             short authDataOffset, short authLen, byte[] outData, short outOffset) {
         assertCredentialLoaded();
         
+        if(length < (short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE)) {
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
+        
         return (short) (CryptoBaseX.doFinal(mCredentialStorageKey, CryptoBaseX.ALG_AES_GCM, Cipher.MODE_DECRYPT, // Key information
-                encryptedData, (short) (offset + AES_GCM_IV_SIZE), (short) (length - AES_GCM_IV_SIZE - CryptoBaseX.AES_GCM_TAGLEN_128), // Data
+                encryptedData, (short) (offset + AES_GCM_IV_SIZE), (short) (length - AES_GCM_IV_SIZE - AES_GCM_TAG_SIZE), // Data
                 encryptedData, offset, AES_GCM_IV_SIZE, // IV
                 authData, authDataOffset, authLen, // authData 
                 outData, outOffset, // Output location
-                encryptedData, (short) (offset + length - CryptoBaseX.AES_GCM_TAGLEN_128), // Tag location
-                CryptoBaseX.AES_GCM_TAGLEN_128)); 
+                encryptedData, (short) (offset + length - AES_GCM_TAG_SIZE), // Tag location
+                AES_GCM_TAG_SIZE)); 
     }
 
+    public boolean verifyAuthenticationTag(byte[] data, short dataOffset, short dataLength, byte[] tag, short tagOffset) {
+
+        encryptCredentialData(mTempBuffer, (short) 0, (short) 0,  // No data input
+                data, dataOffset, dataLength, // Profile as auth data 
+                mTempBuffer, (short) 0); // Output data
+        
+        return Util.arrayCompare(mTempBuffer, AES_GCM_IV_SIZE, tag, tagOffset, AES_GCM_TAG_SIZE) == 0;
+        
+    }
+    
     public boolean verifyEphemeralKey(byte[] ephKey, short offset, short length) {
         assertInitializedEphemeralKeys();
         
@@ -818,5 +832,6 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
+
 
 }
