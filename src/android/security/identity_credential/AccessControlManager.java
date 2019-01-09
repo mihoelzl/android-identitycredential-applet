@@ -24,9 +24,9 @@ import javacard.security.CryptoException;
 
 public class AccessControlManager {
 
-    private static final byte STATUS_AUTHENTICATION = 0;
-    private static final byte STATUS_LOADPROFILES = 1;
-    private static final byte STATUS_GETENTRIES = 2;
+    private static final byte STATUS_TRANSCRIPT_LOADED = 0;
+    private static final byte STATUS_READER_AUTHENTICATED= 1;
+    private static final byte STATUS_USER_AUTHENTICATED = 2;
 
     private static final byte VALUE_CURRENT_STATUS = 0;
     private static final byte VALUE_VALID_PROFILE_IDS = 1;
@@ -74,7 +74,7 @@ public class AccessControlManager {
     public void reset() {
         mStatusWords[VALUE_VALID_PROFILE_IDS] = 0;
         mStatusWords[VALUE_READER_KEY_LENGTH] = 0;
-        setStatus(STATUS_AUTHENTICATION);
+        mStatusWords[VALUE_CURRENT_STATUS] = 0;
     }
 
     public void process() {
@@ -91,18 +91,14 @@ public class AccessControlManager {
         }
     }
     
-    public void authenticationDone() {
-        setStatus(STATUS_LOADPROFILES);
+    public void setStatusFlag(byte statusFlag) {
+        mStatusWords[VALUE_CURRENT_STATUS] = ICUtil.setBit((byte) mStatusWords[VALUE_CURRENT_STATUS], statusFlag, true);
+    }
+
+    public boolean getStatusFlag(byte statusFlag) {
+        return ICUtil.getBit((byte) mStatusWords[VALUE_CURRENT_STATUS], statusFlag);
     }
     
-    public void profilesLoaded() {
-        setStatus(STATUS_GETENTRIES);
-    }
-    
-    
-    public void setStatus(byte status) {
-        mStatusWords[VALUE_CURRENT_STATUS] = status;
-    }
     
     private void addValidProfileId(byte pId) {
         mTempBuffer[(short)(BUFFERPOS_PROFILEIDS + mStatusWords[VALUE_VALID_PROFILE_IDS])] = pId;
@@ -120,8 +116,6 @@ public class AccessControlManager {
         // TODO verify that the ephemeral key has not changed
         // mCryptoManager.verifyEphemeralKey(holderPubKey, holderKeyOffset, holderKeyLength);
 
-        mStatusWords[VALUE_READER_KEY_LENGTH] = readerKeyLength; 
-        Util.arrayCopyNonAtomic(readerKey, readerKeyOffset, mTempBuffer, BUFFERPOS_READERKEY, readerKeyLength);
         
         return true;
     }
@@ -146,9 +140,17 @@ public class AccessControlManager {
         
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         short len = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
-        if (p1p2 == 0x0) { // No authentication, just
-            authenticationDone();
+        if (p1p2 == 0x0) { // No authentication, just the session transcript
+            if (getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
+                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); // Already loaded
+            }
+            len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+            mCryptoManager.startRetrieval(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
+            setStatusFlag(STATUS_TRANSCRIPT_LOADED);
         } else if (p1p2 == 0x1) { // Reader authentication
+            if (getStatusFlag(STATUS_READER_AUTHENTICATED)) {
+                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); // Already authenticated
+            }
             short transcriptLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
             short transcriptOffset = mCBORDecoder.getCurrentOffsetAndIncrease(transcriptLen);
             short readerAuthPubKeyLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
@@ -160,15 +162,28 @@ public class AccessControlManager {
                     readerAuthPubKeyOffset, readerAuthPubKeyLen, receiveBuffer, readerSignOffset, readerSignLen)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
-            authenticationDone();
+            
+            if(!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
+                mCryptoManager.startRetrieval(receiveBuffer, transcriptOffset, transcriptLen);
+                setStatusFlag(STATUS_TRANSCRIPT_LOADED);
+            }
+            
+            mStatusWords[VALUE_READER_KEY_LENGTH] = readerAuthPubKeyLen; 
+            Util.arrayCopyNonAtomic(receiveBuffer, readerAuthPubKeyOffset, mTempBuffer, BUFFERPOS_READERKEY, readerAuthPubKeyLen);
+            
+            setStatusFlag(STATUS_READER_AUTHENTICATED);
         } else if (p1p2 == 0x2) { // User authentication
+            if (getStatusFlag(STATUS_USER_AUTHENTICATED)) {
+                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); // Already authenticated
+            }
+            
             len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
             short tokenOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
 
             if (!authenticateUser(receiveBuffer, tokenOffset, len)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
-            authenticationDone();
+            setStatusFlag(STATUS_USER_AUTHENTICATED);
         } else {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
@@ -233,14 +248,13 @@ public class AccessControlManager {
                     if(secureIdSize == 1) { // Handle special case of 1 byte integers, which is not supported
                         ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                     } else {
-                        mCBORDecoder.increaseOffset((short) 1); // jump to value
+                        mCBORDecoder.increaseOffset((short) 1); // jump to actual value
                         
                         if (Util.arrayCompare(mTempBuffer, BUFFERPOS_USERID, receiveBuffer ,
                                 mCBORDecoder.getCurrentOffsetAndIncrease(secureIdSize), secureIdSize) != 0) {
                             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                         }
                     }
-                    
                     
                     // TODO: check timeout + type
                 }
@@ -253,5 +267,10 @@ public class AccessControlManager {
         }
         
         return true;
+    }
+
+    public boolean checkAccessPermission() {
+        // TODO Auto-generated method stub
+        return false;
     }
 }
