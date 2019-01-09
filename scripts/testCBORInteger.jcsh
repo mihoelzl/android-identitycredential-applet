@@ -1,6 +1,8 @@
 helperFunctions
 selectApplet
 
+/echo ############   TEST CBOR   ############
+
 /send 80530000#(12)00 129000
 /send 80530000#(00)00 009000
 /send 80530000#(1845)00 18459000

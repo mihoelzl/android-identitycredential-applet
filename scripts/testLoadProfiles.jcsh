@@ -1,0 +1,29 @@
+helperFunctions
+selectApplet
+
+
+/echo ############   LOAD PROFILES   ############
+
+## Check that entries have been personalized
+if !${personalizationSuccessful} && ${personalizationSuccessful} != 1
+    testPersonalizeCredential
+end 
+
+## Load the credential 
+/send 80300000#(${credHBK})00 9000
+
+## Authenticate user 
+/send 80310002#(814401560900)00 9000
+
+## Load access control profiles
+/set-var secureACP1 82${accessProfile1}${encProfile1}
+/send 80320000#(${secureACP1}) *9000
+/set-var secureACP2 82${accessProfile2}${encProfile2}
+/send 80320000#(${secureACP2}) *9000
+/set-var secureACP3 82${accessProfile3}${encProfile3}
+/send 80320000#(${secureACP3}) *6982
+
+## Authenticate reader 
+/send 80310001#(83440011223358204F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4444556677)00 9000
+
+/send 80320000#(${secureACP3}) *9000

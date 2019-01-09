@@ -32,25 +32,33 @@ DEFUN sendDataInChain GLOBAL
 
     i=0
     
+    # Send data through APDU chaining
     while ${i} < $(/expr ${nrOfChains} - 1)
         /set-var dataBlock ${data;s$(/expr ${i} * ${apduSize}),${apduSize}}
         /send 90${ins}${p1}${p2}#(${dataBlock})00 *${expReturn}    
         /set-var i $(/expr ${i} + 1)
     end
     
+    # Send last data block
     /set-var dataBlock ${data;s$(/expr ${i} * ${apduSize}),${apduSize}}
-    /send 80${ins}${p1}${p2}#(${dataBlock})00 
+    /send 80${ins}${p1}${p2}#(${dataBlock})00
+     
+    # Read status word and data result
+    sw=${response;s$(/expr ${response;l} - 4),4}
+    result=${response;s0,$(/expr ${response;l} - 4)} 
     
-    if ${response;s$(/expr ${response;l} - 4),4} != '6100' && ${response;s$(/expr ${response;l} - 4),4} != ${expReturn}
+    if ${sw} != '6100' && ${sw} != ${expReturn}
         /error "Invalid status word" 
     end
     
-    result=${response;s0,$(/expr ${response;l} - 4)} 
-    while ${response;s$(/expr ${response;l} - 4),4} == '6100'
+    while ${sw} == '6100'
+        # Get more data from applet
         /send 00C0000000
         result=${result}${response;s0,$(/expr ${response;l} - 4)}
         
-        if ${response;s$(/expr ${response;l} - 4),4} != '6100' && ${response;s$(/expr ${response;l} - 4),4} != ${expReturn}
+        sw=${response;s$(/expr ${response;l} - 4),4}
+        
+        if ${sw} != '6100' && ${sw} != ${expReturn}
             /error "Invalid status word" 
         end
     end

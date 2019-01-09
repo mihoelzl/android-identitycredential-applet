@@ -1,6 +1,8 @@
 helperFunctions
 selectApplet
 
+/echo ############   TEST CBOR BYTE ARRAY   ############
+
 /send 80530000#(64|test|)00 64746573749000
 /send 80530000#(64|tester|)00 64746573749000
 /send 80530000#(65|test|)00 6700
