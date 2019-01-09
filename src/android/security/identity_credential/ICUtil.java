@@ -66,6 +66,35 @@ public class ICUtil {
     /**
      * Get the value of a bit inside a bitfield
      * 
+     * @param bitField The bitfield 
+     * @param flag     Index in the bitfield that should be read
+     * @return Value at the index (0 or 1)
+     */
+    public static boolean getBit(byte bitField, byte flag) {
+        byte bitMask = (byte) ((byte) 1 << (short) (flag & 0x07));
+        return bitMask == (byte) (bitField & bitMask);
+    }
+
+    /**
+     * Set the bit in a given bitfield 
+     * 
+     * @param bitField The bitfield 
+     * @param flag     Index in the bitfield where the bit should be set
+     * @param value    Sets bit to 0 or 1
+     */
+    public static byte setBit(byte bitField, byte flag, boolean value) {
+        byte bitMask = (byte) ((byte) 1 << (short) (flag & 0x07));
+        if (value) {
+            bitField |= bitMask;
+        } else {
+            bitField &= ~bitMask;
+        }
+        return bitField;
+    }
+
+    /**
+     * Get the value of a bit inside a bitfield
+     * 
      * @param bitField The bitfield array
      * @param flag     Index in the bitfield that should be read
      * @return Value at the index (0 or 1)

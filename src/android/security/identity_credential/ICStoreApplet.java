@@ -238,8 +238,67 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
     }
     
 
-    private void processGetEntry() {
+    /**
+     * Process GET ENTRY command. Throws an exception if the credential is not initialized, access control denies entry retrieval or if decryption fails.
+     */
+    private void processGetEntry() throws ISOException {
+            
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
         
+        mAPDUManager.setOutgoing(true);
+        byte[] outBuffer = mAPDUManager.getSendBuffer();
+        
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
+        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
+
+        byte entryStatus = (byte) (receiveBuffer[ISO7816.OFFSET_P1] & 0x7); // Get status of entry personalization
+
+        if (entryStatus == 0x0) { // Start entry: Additional data in command data
+            // AdditionalData is encoded as map {namespace, name, accessControlProfileIds}
+
+            // Get name from authentication data and add signature 
+            mCBORDecoder.readMajorType(CBORBase.TYPE_MAP);
+            
+            mCBORDecoder.skipEntry(); // Skip "namespace"
+            mCBORDecoder.skipEntry(); // Skip namespace value
+            
+            mCBORDecoder.skipEntry(); // Skip "name" 
+            short nameOffset = mCBORDecoder.getCurrentOffset();
+            short nameLength = (short) (mCBORDecoder.skipEntry() - nameOffset);
+            
+//            mDigest.update(receiveBuffer, nameOffset, nameLength);
+
+            mCBORDecoder.skipEntry(); // Skip "AccessControlProfileIds"
+            
+            if (mAccessControlManager.checkAccessPermission()) {
+                // Remember the whole additional data field for the data entry decryption 
+                mCryptoManager.setAuthenticationData(receiveBuffer, inOffset, receivingLength);
+            } else {
+                mCryptoManager.setAuthenticationData(receiveBuffer, inOffset, (short) 0);
+            }
+        } else { // Entry value in command data : encrypt and return 
+            
+            // Decrypt and return
+            short len = mCryptoManager.decryptCredentialData(receiveBuffer, inOffset, mAPDUManager.getReceivingLength(), outBuffer, (short) 0);
+
+            short dataOffset = (short) 0;
+            mCBORDecoder.init(outBuffer, dataOffset, len);
+            
+            if ((entryStatus & 0x2) == 0x2) {
+                // A chunk "inbetween": Do NOT add type and length to signature
+                
+                // Read length information (move offset to actual data)  
+                mCBORDecoder.readLength();
+                dataOffset = mCBORDecoder.getCurrentOffset();
+                len -= dataOffset;
+            }
+            
+            mCryptoManager.updateRetrievalSignature(receiveBuffer, dataOffset, len);
+            
+            mAPDUManager.setOutgoingLength(len);
+        }
     }
     
 }

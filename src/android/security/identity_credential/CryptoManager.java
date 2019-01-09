@@ -29,6 +29,7 @@ import javacard.security.ECPrivateKey;
 import javacard.security.ECPublicKey;
 import javacard.security.KeyBuilder;
 import javacard.security.KeyPair;
+import javacard.security.MessageDigest;
 import javacard.security.RandomData;
 import javacard.security.Signature;
 import javacardx.crypto.Cipher;
@@ -76,6 +77,9 @@ public class CryptoManager {
     
     // Signature object for creating and verifying credential signatures 
     private final Signature mECSignature;
+
+    // Signature object for creating and verifying credential signatures 
+    private final MessageDigest mDigest;
     
     // Random data generator 
     private final RandomData mRandomData;
@@ -137,6 +141,8 @@ public class CryptoManager {
 
         // Initialize the object for signing data using EC
         mECSignature = Signature.getInstance(Signature.ALG_ECDSA_SHA_256, false);
+        
+        mDigest = MessageDigest.getInstance(MessageDigest.ALG_SHA_256, false);
         
         mAPDUManager = apduManager;
         mCBORDecoder = decoder;
@@ -258,7 +264,7 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
         
-        // Encoding the output = [ bstr ]
+        // Encoding the output as [ bstr, bstr ]
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
         mCBOREncoder.startArray((short) 2);
 
@@ -290,7 +296,7 @@ public class CryptoManager {
             // Initialize the signature creation object
             mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
             
-            // Add credential type to the signature ["credentialType" : tstr, ...
+            // Add doc type to the signature {"docType" : tstr, ...
             mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
             mCBOREncoder.startMap((short) 4);
             mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_DOCTYPE, (short) 0,
@@ -340,9 +346,10 @@ public class CryptoManager {
     }
 
     /**
-     * Process the LOAD CREDENTIAL command. Throws an exception if decryption is unsuccessful
+     * Process the LOAD CREDENTIAL command. Throws an exception if decryption is
+     * unsuccessful
      */
-    private void processLoadCredentialBlob() throws ISOException{
+    private void processLoadCredentialBlob() throws ISOException {
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -373,7 +380,6 @@ public class CryptoManager {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
         } catch(CryptoException e) {
-            receiveBuffer[0] = (byte) e.getReason();
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
     }
@@ -502,11 +508,8 @@ public class CryptoManager {
 
         if (entryStatus == 0x0) { // Start entry: Additional data in command data
             // AdditionalData is encoded as map {namespace, name, accessControlProfileIds}
-
-            // Read additional data (used for authentication data in AES-GCM)
-            short addDataOffset = mCBORDecoder.getCurrentOffset();
             
-            // Add beginning of entry to signature
+            // Add beginning of entry to signature (get name and ACP from authentication data)
             // Entry in signature is structured as Map = { "name" : tstr, 
             //           "accessControlProfiles" : [ *uint],
             //           "value" : bstr / tstr / int / bool,
@@ -516,12 +519,13 @@ public class CryptoManager {
             mCBORDecoder.readMajorType(CBORBase.TYPE_MAP);
             
             mCBORDecoder.skipEntry(); // Skip "namespace"
+            mCBORDecoder.skipEntry(); // Skip namespace value
+            
             short nameOffset = mCBORDecoder.getCurrentOffset();
             mCBORDecoder.skipEntry(); // Skip "name"
-            short nameAndACPLength = (short) (mCBORDecoder.skipEntry() - nameOffset); // Skip "accessControlProfileIds"            
-
-            // Get the complete length of the CBOR map
-            short addDataLength = (short)(mCBORDecoder.getCurrentOffset() - addDataOffset);            
+            mCBORDecoder.skipEntry(); // Skip name value
+            mCBORDecoder.skipEntry(); // Skip "accessControlProfileIds"            
+            short nameAndACPLength = (short) (mCBORDecoder.skipEntry() - nameOffset);     
             
             // Add  {"name" : tstr, "accessControlProfiles" : [ *uint] to signature, "value" : ...}
             mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
@@ -538,10 +542,7 @@ public class CryptoManager {
             // add entrySize
             
             // Remember the whole additional data field for the data entry encryption 
-            mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = Util.arrayCopyNonAtomic(receiveBuffer, addDataOffset, mTempBuffer, (short) 0, addDataLength);
-            
-            // Encode output
-            //short outOffset = mCBOREncoder.startByteString((short) (dataLength + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
+            mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = Util.arrayCopyNonAtomic(receiveBuffer, inOffset, mTempBuffer, (short) 0, receivingLength);
         } else { // Entry value in command data : encrypt and return 
             // Additional data needs to be sent first
             if(mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] == 0) {
@@ -706,6 +707,39 @@ public class CryptoManager {
         mAPDUManager.setOutgoingLength(outLen);
     }
 
+
+
+    /**
+     * Starts the signature for entry retrieval. The structure of this
+     * signature is: 
+     *  AuthenticatedData = { 
+     *      "SessionTranscript" : any, 
+     *      "Response" : { DocType => { + Namespace => DataItems } } }
+     * 
+     * @param sessionTranscriptBuffer 
+     * @param transcriptOffset
+     * @param transcriptLen
+     */
+    public void startRetrieval(byte[] sessionTranscriptBuffer, short transcriptOffset, short transcriptLen) {
+        assertCredentialLoaded();
+                
+        mDigest.reset();
+        
+        short keyOffset = 0;
+        mCBOREncoder.init(mTempBuffer, keyOffset, TEMP_BUFFER_SIZE);
+        short keyLength = mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT, (short) 0, (short) ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT.length);
+        
+        mDigest.update(mTempBuffer, keyOffset, keyLength);
+        mDigest.update(sessionTranscriptBuffer, transcriptOffset, transcriptLen);
+        
+        keyOffset = mCBOREncoder.getCurrentOffset();
+        mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_RESPONSE, (short) 0, (short) ICConstants.CBOR_MAPKEY_RESPONSE.length);
+        mDigest.update(mTempBuffer, keyOffset, keyLength);
+        
+        // TODO: add DocType
+    }
+
+
     /**
      * Encrypt the given data with the storage key using AES-GCM. The data output
      * format is R || encrypted data || Tag.
@@ -752,7 +786,7 @@ public class CryptoManager {
      * @return Number of bytes written to output buffer
      */
     public short decryptCredentialData(byte[] encryptedData, short offset, short length, byte[] authData,
-            short authDataOffset, short authLen, byte[] outData, short outOffset) {
+            short authDataOffset, short authLen, byte[] outData, short outOffset) throws ISOException {
         assertCredentialLoaded();
         
         if(length < (short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE)) {
@@ -766,6 +800,32 @@ public class CryptoManager {
                 outData, outOffset, // Output location
                 encryptedData, (short) (offset + length - AES_GCM_TAG_SIZE), // Tag location
                 AES_GCM_TAG_SIZE)); 
+    }
+
+    public short decryptCredentialData(byte[] encryptedData, short offset, short length, byte[] outData,
+            short outOffset) {
+        // Additional data needs to be sent first
+        if(mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] == 0) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); 
+        }
+        
+        return decryptCredentialData(encryptedData, offset, length, mTempBuffer, (short) 0,
+                mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH], outData, outOffset);
+    }
+
+    public void setAuthenticationData(byte[] authData, short offset, short length) throws ISOException {
+        assertCredentialLoaded();
+
+        mDigest.update(authData, offset, length);
+        
+        mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = Util.arrayCopyNonAtomic(authData, offset, mTempBuffer, (short) 0,
+                length);
+    }
+
+    public void updateRetrievalSignature(byte[] receiveBuffer, short dataOffset, short len) {
+        assertCredentialLoaded();
+        
+        mDigest.update(receiveBuffer, dataOffset, len);
     }
 
     /**
@@ -842,6 +902,5 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
-
 
 }
