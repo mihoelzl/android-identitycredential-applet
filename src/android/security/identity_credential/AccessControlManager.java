@@ -33,12 +33,13 @@ public class AccessControlManager {
     private static final byte VALUE_READER_KEY_LENGTH = 2;
     private static final byte STATUS_WORDS = 3;
 
-    private static final byte BUFFERPOS_USERID_LENGTH = 8;
+    private static final byte MAX_USER_ID_LENGTH = 8;
+    private static final byte MAX_PROFILE_IDS = 127;
     
     private static final short BUFFERPOS_READERKEY = 0;
     private static final short BUFFERPOS_USERID = BUFFERPOS_READERKEY + 65;
-    private static final short BUFFERPOS_PROFILEIDS = BUFFERPOS_USERID + BUFFERPOS_USERID_LENGTH;
-    private static final short TEMPBUFFER_SIZE = BUFFERPOS_PROFILEIDS + 128;
+    private static final short BUFFERPOS_PROFILEIDS = BUFFERPOS_USERID + MAX_USER_ID_LENGTH;
+    private static final short TEMPBUFFER_SIZE = BUFFERPOS_PROFILEIDS + MAX_PROFILE_IDS;
 
     private static final byte LENGTH_MAPKEY_READERAUTHPUBKEY = 16;
     
@@ -120,13 +121,15 @@ public class AccessControlManager {
         // mCryptoManager.verifyEphemeralKey(holderPubKey, holderKeyOffset, holderKeyLength);
 
         mStatusWords[VALUE_READER_KEY_LENGTH] = readerKeyLength; 
+        Util.arrayCopyNonAtomic(readerKey, readerKeyOffset, mTempBuffer, BUFFERPOS_READERKEY, readerKeyLength);
+        
         return true;
     }
     
-    public boolean authenticateUser(byte[] authToken, short tokenOffset) {
+    public boolean authenticateUser(byte[] authToken, short tokenOffset, short tokenLength) {
         // TODO: How to we verify the token?
         
-        Util.arrayCopyNonAtomic(authToken, tokenOffset, mTempBuffer, BUFFERPOS_USERID, BUFFERPOS_USERID_LENGTH);
+        Util.arrayCopyNonAtomic(authToken, tokenOffset, mTempBuffer, BUFFERPOS_USERID, tokenLength);
         
         return true;
     }
@@ -143,26 +146,26 @@ public class AccessControlManager {
         
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         short len = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
-        if(p1p2 == 0x0) { // No authentication, just 
+        if (p1p2 == 0x0) { // No authentication, just
             authenticationDone();
-        } else if(p1p2 == 0x1 && len == 2) { // Reader authentication
+        } else if (p1p2 == 0x1) { // Reader authentication
             short transcriptLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            short transcriptOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
-            short readerAuthPubKeyLen= mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            short readerAuthPubKeyOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
-            short readerSignLen= mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            short readerSignOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
+            short transcriptOffset = mCBORDecoder.getCurrentOffsetAndIncrease(transcriptLen);
+            short readerAuthPubKeyLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+            short readerAuthPubKeyOffset = mCBORDecoder.getCurrentOffsetAndIncrease(readerAuthPubKeyLen);
+            short readerSignLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+            short readerSignOffset = mCBORDecoder.getCurrentOffsetAndIncrease(readerSignLen);
 
             if (!authenticateReader(receiveBuffer, transcriptOffset, transcriptLen, receiveBuffer,
                     readerAuthPubKeyOffset, readerAuthPubKeyLen, receiveBuffer, readerSignOffset, readerSignLen)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             authenticationDone();
-        } else if (p1p2 == 0x2 && len == 1) { // User authentication
+        } else if (p1p2 == 0x2) { // User authentication
             len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
             short tokenOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
 
-            if (!authenticateUser(receiveBuffer, tokenOffset)) {
+            if (!authenticateUser(receiveBuffer, tokenOffset, len)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             authenticationDone();
@@ -181,7 +184,8 @@ public class AccessControlManager {
         }
         
         mAPDUManager.setOutgoing();
-        
+
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
 
         // Start location of the profile
@@ -200,7 +204,8 @@ public class AccessControlManager {
             
             short mapSize = mCBORDecoder.readMajorType(CBORBase.TYPE_MAP);
             
-            mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING); // ignore actual keys, we assume a fixed structure
+            // Read keys and ignore them, we assume a fixed structure
+            mCBORDecoder.increaseOffset(mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING)); 
             byte pId = mCBORDecoder.readInt8();
             
             if (mapSize >= 2) {
@@ -217,20 +222,25 @@ public class AccessControlManager {
                     }
                 }
                 
-                if(mCBORDecoder.getCurrentOffset() != receivingLength) { // user authentication 
+                if(mCBORDecoder.getCurrentOffset() != tagOffset) { // more data --> user authentication 
                     // userAuthType
-                    keyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
-                    mCBORDecoder.increaseOffset(keyLength);
-
                     short type = mCBORDecoder.readMajorType(CBORBase.TYPE_UNSIGNED_INTEGER);
                     
                     // userSecureId
                     keyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
                     mCBORDecoder.increaseOffset(keyLength);
-                    if (Util.arrayCompare(mTempBuffer, BUFFERPOS_USERID, receiveBuffer,
-                            mCBORDecoder.getCurrentOffsetAndIncrease(BUFFERPOS_USERID_LENGTH), BUFFERPOS_USERID_LENGTH) != 0) {
+                    short secureIdSize = mCBORDecoder.getIntegerSize();
+                    if(secureIdSize == 1) { // Handle special case of 1 byte integers, which is not supported
                         ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+                    } else {
+                        mCBORDecoder.increaseOffset((short) 1); // jump to value
+                        
+                        if (Util.arrayCompare(mTempBuffer, BUFFERPOS_USERID, receiveBuffer ,
+                                mCBORDecoder.getCurrentOffsetAndIncrease(secureIdSize), secureIdSize) != 0) {
+                            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+                        }
                     }
+                    
                     
                     // TODO: check timeout + type
                 }

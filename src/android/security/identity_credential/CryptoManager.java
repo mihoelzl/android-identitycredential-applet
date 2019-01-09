@@ -768,14 +768,24 @@ public class CryptoManager {
                 AES_GCM_TAG_SIZE)); 
     }
 
-    public boolean verifyAuthenticationTag(byte[] data, short dataOffset, short dataLength, byte[] tag, short tagOffset) {
+    /**
+     * Verify only the authentication tag of an entry that did not encrypt data.  
+     *    
+     * @param authData Buffer with the authentication data
+     * @param dataOffset Offset in the authentication data buffer
+     * @param dataLength Length of the authentication data
+     * @param tag Buffer of the provide authentication tag that should be tested
+     * @param tagOffset Offset into the buffer for the authentication tag
+     * @return True or false indicating if the authentication tag matches
+     */
+    public boolean verifyAuthenticationTag(byte[] authData, short dataOffset, short dataLength, byte[] tag, short tagOffset) {
+        assertCredentialLoaded();
 
         encryptCredentialData(mTempBuffer, (short) 0, (short) 0,  // No data input
-                data, dataOffset, dataLength, // Profile as auth data 
+                authData, dataOffset, dataLength, // Profile as auth data 
                 mTempBuffer, (short) 0); // Output data
         
         return Util.arrayCompare(mTempBuffer, AES_GCM_IV_SIZE, tag, tagOffset, AES_GCM_TAG_SIZE) == 0;
-        
     }
     
     public boolean verifyEphemeralKey(byte[] ephKey, short offset, short length) {
