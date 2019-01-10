@@ -46,24 +46,15 @@ public class AccessControlManager {
     private final short[] mStatusWords;
     
     private final byte[] mTempBuffer;
-
-    private final CryptoManager mCryptoManager;
     
     private final APDUManager mAPDUManager;
 
     // Reference to the internal CBOR decoder instance
     private final CBORDecoder mCBORDecoder;
-    
-    // Reference to the internal CBOR encoder instance
-    private final CBOREncoder mCBOREncoder;
-    
-    public AccessControlManager(CryptoManager cryptoManager, APDUManager apduManager, CBORDecoder decoder, CBOREncoder encoder) {
-        mCryptoManager = cryptoManager;
         
+    public AccessControlManager(APDUManager apduManager, CBORDecoder decoder) {        
         mAPDUManager = apduManager;
-        
-        mCBOREncoder = encoder;
-        
+                
         mCBORDecoder = decoder;
         
         mTempBuffer  = JCSystem.makeTransientByteArray(TEMPBUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
@@ -77,14 +68,14 @@ public class AccessControlManager {
         mStatusWords[VALUE_CURRENT_STATUS] = 0;
     }
 
-    public void process() {
+    public void process(CryptoManager cryptoManager) {
         byte[] buf = mAPDUManager.getReceiveBuffer();
         switch (buf[ISO7816.OFFSET_INS]) {
         case ISO7816.INS_ICS_AUTHENTICATE:
-            processAuthenticate();
+            processAuthenticate(cryptoManager);
             break;
         case ISO7816.INS_ICS_LOAD_ACCESS_CONTROL_PROFILE:
-            processLoadAccessControlProfile();
+            processLoadAccessControlProfile(cryptoManager);
             break;
         default:
             ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
@@ -131,7 +122,7 @@ public class AccessControlManager {
     /**
      * Process the AUTHENTICATE command (validate encrypted access control profiles)
      */
-    private void processAuthenticate() {
+    private void processAuthenticate(CryptoManager cryptoManager) {
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -145,7 +136,7 @@ public class AccessControlManager {
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); // Already loaded
             }
             len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            mCryptoManager.startRetrieval(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
+            cryptoManager.startRetrievalSignature(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
             setStatusFlag(STATUS_TRANSCRIPT_LOADED);
         } else if (p1p2 == 0x1) { // Reader authentication
             if (getStatusFlag(STATUS_READER_AUTHENTICATED)) {
@@ -164,7 +155,7 @@ public class AccessControlManager {
             }
             
             if(!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
-                mCryptoManager.startRetrieval(receiveBuffer, transcriptOffset, transcriptLen);
+                cryptoManager.startRetrievalSignature(receiveBuffer, transcriptOffset, transcriptLen);
                 setStatusFlag(STATUS_TRANSCRIPT_LOADED);
             }
             
@@ -189,7 +180,7 @@ public class AccessControlManager {
         }
     }
 
-    public boolean processLoadAccessControlProfile() {
+    public boolean processLoadAccessControlProfile(CryptoManager cryptoManager) {
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -212,7 +203,7 @@ public class AccessControlManager {
         short tagOffset = mCBORDecoder.getCurrentOffset();
         
         try {
-            mCryptoManager.verifyAuthenticationTag(receiveBuffer, profileOffset, profileLength, receiveBuffer, tagOffset);
+            cryptoManager.verifyAuthenticationTag(receiveBuffer, profileOffset, profileLength, receiveBuffer, tagOffset);
 
             // Success: check if authentication is valid for this profile and store the id  
             mCBORDecoder.init(receiveBuffer, profileOffset, receivingLength);
@@ -269,7 +260,7 @@ public class AccessControlManager {
         return true;
     }
 
-    public boolean checkAccessPermission() {
+    public boolean checkAccessPermission(byte[] pids, short offset, short length) {
         // TODO Auto-generated method stub
         return false;
     }

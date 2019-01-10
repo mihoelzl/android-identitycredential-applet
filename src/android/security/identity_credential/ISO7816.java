@@ -42,8 +42,9 @@ public interface ISO7816 extends javacard.framework.ISO7816 {
     public static final byte INS_ICS_LOAD_CREDENTIAL_BLOB = (byte) 0x30;
     public static final byte INS_ICS_AUTHENTICATE = (byte) 0x31;
     public static final byte INS_ICS_LOAD_ACCESS_CONTROL_PROFILE = (byte) 0x32;
-    public static final byte INS_ICS_GET_ENTRY = (byte) 0x3A;
-    public static final byte INS_ICS_CREATE_SIGNATURE = (byte) 0x3B;
+    public static final byte INS_ICS_GET_NAMESPACE = (byte) 0x3A;
+    public static final byte INS_ICS_GET_ENTRY = (byte) 0x3B;
+    public static final byte INS_ICS_CREATE_SIGNATURE = (byte) 0x3C;
     public static final byte INS_ICS_CREATE_SIGNING_KEY= (byte) 0x40;
     
     /**

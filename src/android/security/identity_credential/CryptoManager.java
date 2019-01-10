@@ -42,6 +42,9 @@ public class CryptoManager {
     private static final byte FLAG_CREDENIAL_PERSONALIZING_PROFILES = 3;
     private static final byte FLAG_CREDENIAL_PERSONALIZING_ENTRIES = 4;
     private static final byte FLAG_CREDENIAL_PERSONALIZING_NAMESPACE = 5;
+    private static final byte FLAG_CREDENIAL_RETRIEVAL_STARTED = 6;
+    private static final byte FLAG_CREDENIAL_RETRIEVAL_ENTRIES = 7;
+    private static final byte FLAG_CREDENIAL_RETRIEVAL_NAMESPACE = 8;
     private static final byte STATUS_FLAGS_SIZE = 1;
 
     private static final short TEMP_BUFFER_SIZE = 128;
@@ -51,7 +54,7 @@ public class CryptoManager {
     private static final byte STATUS_ENTRIES_IN_NAMESPACE_TOTAL = 2;
     private static final byte STATUS_ENTRIES_IN_NAMESPACE = 3;
     private static final byte STATUS_ENTRY_ADDDATA_LENGTH = 4;
-    private static final byte STATUS_NAMESPACES_PERSONALIZED = 5;
+    private static final byte STATUS_NAMESPACES_ADDED = 5;
     private static final byte STATUS_NAMESPACES_TOTAL = 6;
     private static final byte STATUS_WORDS = 7;
     
@@ -88,6 +91,9 @@ public class CryptoManager {
     // Reference to the internal APDU manager instance
     private final APDUManager mAPDUManager;
     
+    // Reference to the Access control manager instance
+    private final AccessControlManager mAccessControlManager;
+    
     // Reference to the internal CBOR decoder instance
     private final CBORDecoder mCBORDecoder;
     
@@ -104,7 +110,7 @@ public class CryptoManager {
     private final short[] mStatusWords;
 
 
-    public CryptoManager(APDUManager apduManager, CBORDecoder decoder, CBOREncoder encoder) {
+    public CryptoManager(APDUManager apduManager, AccessControlManager accessControlManager, CBORDecoder decoder, CBOREncoder encoder) {
         mTempBuffer = JCSystem.makeTransientByteArray((short)TEMP_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
 
         mStatusFlags = JCSystem.makeTransientByteArray((short)(STATUS_FLAGS_SIZE), JCSystem.CLEAR_ON_DESELECT);
@@ -145,17 +151,19 @@ public class CryptoManager {
         mDigest = MessageDigest.getInstance(MessageDigest.ALG_SHA_256, false);
         
         mAPDUManager = apduManager;
+        mAccessControlManager = accessControlManager;
         mCBORDecoder = decoder;
         mCBOREncoder = encoder;
     }
-
+    
     public void reset() {
         ICUtil.setBit(mStatusFlags, FLAG_TEST_CREDENTIAL, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_KEYS_INITIALIZED, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZATION_STATE, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, false);
-
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, false);
+        
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL] = 0;
         mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = 0;
@@ -194,6 +202,12 @@ public class CryptoManager {
             break;
         case ISO7816.INS_ICS_LOAD_CREDENTIAL_BLOB:
             processLoadCredentialBlob();
+            break;       
+        case ISO7816.INS_ICS_GET_NAMESPACE:
+            processGetNameSpace();
+            break;
+        case ISO7816.INS_ICS_GET_ENTRY:
+            processGetEntry();
             break;
         case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
             break;            
@@ -433,10 +447,9 @@ public class CryptoManager {
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
 
-        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
         
-        if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES) && mStatusWords[STATUS_NAMESPACES_PERSONALIZED] == 0) {
+        if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES) && mStatusWords[STATUS_NAMESPACES_ADDED] == 0) {
             // First namespace get the total number of namespaces from P1(lower 4 bits) + P2
             mStatusWords[STATUS_NAMESPACES_TOTAL] = (short) ((((short) receiveBuffer[ISO7816.OFFSET_P1] & 0x0F) << 8)
                     + receiveBuffer[ISO7816.OFFSET_P2]);
@@ -447,7 +460,7 @@ public class CryptoManager {
             mCBOREncoder.startMap(mStatusWords[STATUS_NAMESPACES_TOTAL]);
 
             // Start personalization, reset the namespace counter
-            mStatusWords[STATUS_NAMESPACES_PERSONALIZED] = 0;
+            mStatusWords[STATUS_NAMESPACES_ADDED] = 0;
             
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, true);
         } 
@@ -455,21 +468,8 @@ public class CryptoManager {
         // Check that current namespace is already finished with personalization
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE)) {
             assertStatusFlagSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES); // Verify that namespaces aren't already personalized
-            
-            mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
 
-            // Get the number of entries in this namespace
-            mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]= mCBORDecoder.readMajorType(CBORBase.TYPE_UNSIGNED_INTEGER);
-            
-            short namespaceNameLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
-            short namespaceNameOffset = mCBORDecoder.getCurrentOffsetAndIncrease(namespaceNameLength);
-            
-            mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
-            mCBOREncoder.encodeTextString(receiveBuffer, namespaceNameOffset, namespaceNameLength);
-            mCBOREncoder.startArray(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]);
-
-            // Reset counter for the number of entries in current namespace 
-            mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
+            startNamespaceInSignature(receiveBuffer, inOffset, receivingLength);
             
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, true);
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
@@ -541,8 +541,7 @@ public class CryptoManager {
             mECSignature.update(mTempBuffer, (short) 0, (short) mCBOREncoder.getCurrentOffset());
             // add entrySize
             
-            // Remember the whole additional data field for the data entry encryption 
-            mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = Util.arrayCopyNonAtomic(receiveBuffer, inOffset, mTempBuffer, (short) 0, receivingLength);
+            stroeAdditionalData(receiveBuffer, inOffset, receivingLength);
         } else { // Entry value in command data : encrypt and return 
             // Additional data needs to be sent first
             if(mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] == 0) {
@@ -591,9 +590,9 @@ public class CryptoManager {
                 // Finished with personalization of this namespace
                 ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, false);
                 
-                mStatusWords[STATUS_NAMESPACES_PERSONALIZED]++;
+                mStatusWords[STATUS_NAMESPACES_ADDED]++;
                 
-                if(mStatusWords[STATUS_NAMESPACES_PERSONALIZED] == mStatusWords[STATUS_NAMESPACES_TOTAL]) {
+                if(mStatusWords[STATUS_NAMESPACES_ADDED] == mStatusWords[STATUS_NAMESPACES_TOTAL]) {
                     // All namespaces personalized
                     ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_ENTRIES, false);
                 }
@@ -720,7 +719,7 @@ public class CryptoManager {
      * @param transcriptOffset
      * @param transcriptLen
      */
-    public void startRetrieval(byte[] sessionTranscriptBuffer, short transcriptOffset, short transcriptLen) {
+    public void startRetrievalSignature(byte[] sessionTranscriptBuffer, short transcriptOffset, short transcriptLen) {
         assertCredentialLoaded();
                 
         mDigest.reset();
@@ -734,11 +733,174 @@ public class CryptoManager {
         
         keyOffset = mCBOREncoder.getCurrentOffset();
         mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_RESPONSE, (short) 0, (short) ICConstants.CBOR_MAPKEY_RESPONSE.length);
+        keyLength = (short) (mCBOREncoder.startMap((short) 1) - keyOffset);
         mDigest.update(mTempBuffer, keyOffset, keyLength);
         
         // TODO: add DocType
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, true);
     }
 
+    /**
+     * Process GET NAMESPACE command. Throws an exception if the credential is not initialized.
+     */
+    private void processGetNameSpace() throws ISOException {
+        assertCredentialLoaded();
+        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_STARTED);
+            
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
+
+        mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+
+        if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES) && mStatusWords[STATUS_NAMESPACES_ADDED] == 0) {
+            // First namespace get the total number of namespaces from P1(lower 4 bits) + P2
+            mStatusWords[STATUS_NAMESPACES_TOTAL] = (short) ((((short) receiveBuffer[ISO7816.OFFSET_P1] & 0x0F) << 8)
+                    + receiveBuffer[ISO7816.OFFSET_P2]);
+
+            mCBOREncoder.startMap(mStatusWords[STATUS_NAMESPACES_TOTAL]);
+
+            // Start personalization, reset the namespace counter
+            mStatusWords[STATUS_NAMESPACES_ADDED] = 0;
+            
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES, true);
+        } 
+        
+        // Check that current namespace is already finished with retrieveal
+        if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE)) {
+            assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES); // Verify that there are still missing namespaces
+
+            startNamespaceInSignature(receiveBuffer, inOffset, receivingLength);
+            
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, true);
+            mDigest.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+        } else {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+    }
+
+    /**
+     * Read the namespace configuration from the CBOR structure in the received
+     * buffer and creates the beginning of the CBOR structure for the signature into
+     * the CBOR encoder.
+     * 
+     * @param receiveBuffer Reference to the receiving buffer
+     * @param inOffset Offset in the receiving buffer
+     * @param receivingLength Length of the data in the receiving buffer
+     */
+    private void startNamespaceInSignature(byte[] receiveBuffer, short inOffset, short receivingLength) {
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
+        mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
+
+        // Get the number of entries in this namespace
+        mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]= mCBORDecoder.readMajorType(CBORBase.TYPE_UNSIGNED_INTEGER);
+        
+        short namespaceNameLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
+        short namespaceNameOffset = mCBORDecoder.getCurrentOffsetAndIncrease(namespaceNameLength);
+        
+        mCBOREncoder.encodeTextString(receiveBuffer, namespaceNameOffset, namespaceNameLength);
+        mCBOREncoder.startArray(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]);
+
+        // Reset counter for the number of entries in current namespace 
+        mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
+    }
+    
+    /**
+     * Process GET ENTRY command. Throws an exception if the credential is not initialized, access control denies entry retrieval or if decryption fails.
+     */
+    private void processGetEntry() throws ISOException {
+        assertCredentialLoaded();
+        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES);
+        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_NAMESPACE);
+        
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
+        
+        mAPDUManager.setOutgoing(true);
+        byte[] outBuffer = mAPDUManager.getSendBuffer();
+        
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
+        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
+
+        byte entryStatus = (byte) (receiveBuffer[ISO7816.OFFSET_P1] & 0x7); // Get status of entry personalization
+
+        if (entryStatus == 0x0) { // Start entry: Additional data in command data
+            // AdditionalData is encoded as map {namespace, name, accessControlProfileIds}
+
+            // Get name from authentication data and add signature 
+            mCBORDecoder.readMajorType(CBORBase.TYPE_MAP);
+            
+            mCBORDecoder.skipEntry(); // Skip "namespace"
+            mCBORDecoder.skipEntry(); // Skip namespace value
+            
+            mCBORDecoder.skipEntry(); // Skip "name" 
+            short nameOffset = mCBORDecoder.getCurrentOffset();
+            short nameLength = (short) (mCBORDecoder.skipEntry() - nameOffset);
+            
+            // Add the actual name to the signature
+            mDigest.update(receiveBuffer, nameOffset, nameLength);
+
+            mCBORDecoder.skipEntry(); // Skip "AccessControlProfileIds"
+            short nrOfPids = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
+            
+            if (mAccessControlManager.checkAccessPermission(receiveBuffer, mCBORDecoder.getCurrentOffset(), nrOfPids)) {
+                // Remember the whole additional data field for the data entry decryption 
+                stroeAdditionalData(receiveBuffer, inOffset, receivingLength);
+            } else {
+                mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = 0;
+            }
+        } else { // Entry value in command data : encrypt and return 
+            
+            // Decrypt and return
+            short len = decryptCredentialData(receiveBuffer, inOffset, mAPDUManager.getReceivingLength(), outBuffer, (short) 0);
+
+            short dataOffset = (short) 0;
+            mCBORDecoder.init(outBuffer, dataOffset, len);
+            
+            if ((entryStatus & 0x2) == 0x2) {
+                // A chunk "inbetween": Do NOT add type and length to signature
+                
+                // Read length information (move offset to actual data)  
+                mCBORDecoder.readLength();
+                dataOffset = mCBORDecoder.getCurrentOffset();
+                len -= dataOffset;
+            }
+            
+            // Add the value to the signature
+            mDigest.update(receiveBuffer, dataOffset, len);
+            
+            mAPDUManager.setOutgoingLength(len);
+        }
+
+        // If first bit is set: this command was the last (or only) chunk
+        if ((entryStatus & 0x1) == 0x1) {
+            mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = 0; // Reset entry information
+            
+            mStatusWords[STATUS_ENTRIES_IN_NAMESPACE]++;
+            if(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] == mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]) {
+                // Finished with retrieval of this namespace
+                ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, false);
+                
+                mStatusWords[STATUS_NAMESPACES_ADDED]++;
+                
+                if(mStatusWords[STATUS_NAMESPACES_ADDED] == mStatusWords[STATUS_NAMESPACES_TOTAL]) {
+                    // All namespaces retrieved
+                    ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES, false);
+                }
+            } 
+        }
+    }
+
+    private void stroeAdditionalData(byte[] receiveBuffer, short inOffset, short receivingLength) {
+        if(receivingLength > TEMP_BUFFER_SIZE) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
+        
+        mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = Util.arrayCopyNonAtomic(receiveBuffer, inOffset, mTempBuffer, (short) 0,
+                receivingLength);
+    }
+    
 
     /**
      * Encrypt the given data with the storage key using AES-GCM. The data output
@@ -813,20 +975,6 @@ public class CryptoManager {
                 mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH], outData, outOffset);
     }
 
-    public void setAuthenticationData(byte[] authData, short offset, short length) throws ISOException {
-        assertCredentialLoaded();
-
-        mDigest.update(authData, offset, length);
-        
-        mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = Util.arrayCopyNonAtomic(authData, offset, mTempBuffer, (short) 0,
-                length);
-    }
-
-    public void updateRetrievalSignature(byte[] receiveBuffer, short dataOffset, short len) {
-        assertCredentialLoaded();
-        
-        mDigest.update(receiveBuffer, dataOffset, len);
-    }
 
     /**
      * Verify only the authentication tag of an entry that did not encrypt data.  
