@@ -3,8 +3,9 @@ selectApplet
 
 /echo ############   CREATE EPHEMERAL KEY   ############
 
+/send 8010000000 
 /send 8052000000 9000
-/send 8052000100 825841*5820*9000
+/send 8052000100 835841*5820*9000
 /send 8052000200 6A86 
 
 #/close

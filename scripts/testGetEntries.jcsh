@@ -20,13 +20,18 @@ end
 /send 80320000#(${secureACP1}) *9000
 /set-var secureACP2 82${accessProfile2}${encProfile2}
 /send 80320000#(${secureACP2}) *9000
+/set-var secureACP2 82${accessProfile2}${encProfile1}
+/send 80320000#(${secureACP2}) *6982  # Invalid MAC
 /set-var secureACP3 82${accessProfile3}${encProfile3}
-/send 80320000#(${secureACP3}) *6982
+/send 80320000#(${secureACP3}) *6982  # Reader authentication not provided
 
 ## Authenticate reader 
 /send 80310001#(83440011223358204F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4444556677)00 9000
 
 /send 80320000#(${secureACP3}) *9000
+
+/set-var secureACP4 82${accessProfile4}${encProfile4}
+/send 80320000#(${secureACP4}) *9000
 
 /send 803A0000#(${namespace1})00 *9000
 /send 803B0000#(${entry1AddData})00 *9000
@@ -35,5 +40,5 @@ end
 /send 803B0100#(${encEntry2})00 *9000
 /send 803B0000#(${entry3AddData})00 *9000
 /send 803B0100#(${encEntry3})00 *9000
-/send 803B0000#(${entry4AddData})00 *9000
-/send 803B0100#(${encEntry4})00 *9000
+/send 803B0000#(${entry4AddData})00 *6982
+/send 803B0100#(${encEntry4})00 *6982

@@ -225,9 +225,14 @@ public class AccessControlManager {
         short profileLength = (short)(mCBORDecoder.skipEntry() - profileOffset);
 
         short tagOffset = mCBORDecoder.getCurrentOffset();
+        mCBORDecoder.readLength();
+        short tagValueOffset = mCBORDecoder.getCurrentOffset();
         
         try {
-            cryptoManager.verifyAuthenticationTag(receiveBuffer, profileOffset, profileLength, receiveBuffer, tagOffset);
+            if (!cryptoManager.verifyAuthenticationTag(receiveBuffer, profileOffset, profileLength, receiveBuffer,
+                    tagValueOffset)) {
+                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
 
             // Success: check if authentication is valid for this profile and store the id  
             mCBORDecoder.init(receiveBuffer, profileOffset, receivingLength);
