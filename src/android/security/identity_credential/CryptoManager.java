@@ -45,7 +45,7 @@ public class CryptoManager {
     private static final byte FLAG_CREDENIAL_RETRIEVAL_STARTED = 6;
     private static final byte FLAG_CREDENIAL_RETRIEVAL_ENTRIES = 7;
     private static final byte FLAG_CREDENIAL_RETRIEVAL_NAMESPACE = 8;
-    private static final byte STATUS_FLAGS_SIZE = 1;
+    private static final byte STATUS_FLAGS_SIZE = 2;
 
     private static final short TEMP_BUFFER_SIZE = 128;
 
@@ -53,7 +53,7 @@ public class CryptoManager {
     private static final byte STATUS_PROFILES_PERSONALIZED = 1;
     private static final byte STATUS_ENTRIES_IN_NAMESPACE_TOTAL = 2;
     private static final byte STATUS_ENTRIES_IN_NAMESPACE = 3;
-    private static final byte STATUS_ENTRY_ADDDATA_LENGTH = 4;
+    private static final byte STATUS_ENTRY_AUTHDATA_LENGTH = 4;
     private static final byte STATUS_NAMESPACES_ADDED = 5;
     private static final byte STATUS_NAMESPACES_TOTAL = 6;
     private static final byte STATUS_WORDS = 7;
@@ -166,7 +166,7 @@ public class CryptoManager {
         
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL] = 0;
-        mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = 0;
+        mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = 0;
         
         for (short i = 0; i < STATUS_WORDS; i++) {
             mStatusWords[i] = 0;
@@ -437,7 +437,8 @@ public class CryptoManager {
     }
 
     /**
-     * Process the PERSONALIZE NAMESPACE command. Throws an exception when namespace was already personalized
+     * Process the PERSONALIZE NAMESPACE command. Throws an exception when namespace
+     * was already personalized
      */
     private void processPersonalizeNamespace() {
         assertInPersonalizationState();
@@ -541,10 +542,10 @@ public class CryptoManager {
             mECSignature.update(mTempBuffer, (short) 0, (short) mCBOREncoder.getCurrentOffset());
             // add entrySize
             
-            stroeAdditionalData(receiveBuffer, inOffset, receivingLength);
+            storeAuthenticationData(receiveBuffer, inOffset, receivingLength);
         } else { // Entry value in command data : encrypt and return 
             // Additional data needs to be sent first
-            if(mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] == 0) {
+            if(mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] == 0) {
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); 
             }
             
@@ -568,7 +569,7 @@ public class CryptoManager {
             
             // Encrypt and return
             short len = encryptCredentialData(receiveBuffer, inOffset, mAPDUManager.getReceivingLength(), mTempBuffer, (short) 0,
-                    mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH], outBuffer, (short) 0);
+                    mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH], outBuffer, (short) 0);
             
             mAPDUManager.setOutgoingLength(len);
         }
@@ -583,7 +584,7 @@ public class CryptoManager {
             mCBOREncoder.encodeBoolean(directlyAvailable);
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
         
-            mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = 0; // Reset entry information
+            mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = 0; // Reset entry information
             
             mStatusWords[STATUS_ENTRIES_IN_NAMESPACE]++;
             if(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] == mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]) {
@@ -738,14 +739,18 @@ public class CryptoManager {
         
         // TODO: add DocType
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, true);
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES, false);
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, false);
+        
     }
 
     /**
-     * Process GET NAMESPACE command. Throws an exception if the credential is not initialized.
+     * Process GET NAMESPACE command. Throws an exception if the credential is not
+     * initialized.
      */
     private void processGetNameSpace() throws ISOException {
         assertCredentialLoaded();
-        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_STARTED);
+        assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_STARTED);
             
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
@@ -810,8 +815,8 @@ public class CryptoManager {
      */
     private void processGetEntry() throws ISOException {
         assertCredentialLoaded();
-        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES);
-        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_NAMESPACE);
+        assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES);
+        assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_NAMESPACE);
         
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
@@ -846,9 +851,10 @@ public class CryptoManager {
             
             if (mAccessControlManager.checkAccessPermission(receiveBuffer, mCBORDecoder.getCurrentOffset(), nrOfPids)) {
                 // Remember the whole additional data field for the data entry decryption 
-                stroeAdditionalData(receiveBuffer, inOffset, receivingLength);
+                storeAuthenticationData(receiveBuffer, inOffset, receivingLength);
             } else {
-                mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = 0;
+                mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = 0;
+                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
         } else { // Entry value in command data : encrypt and return 
             
@@ -875,7 +881,7 @@ public class CryptoManager {
 
         // If first bit is set: this command was the last (or only) chunk
         if ((entryStatus & 0x1) == 0x1) {
-            mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = 0; // Reset entry information
+            mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = 0; // Reset entry information
             
             mStatusWords[STATUS_ENTRIES_IN_NAMESPACE]++;
             if(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] == mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]) {
@@ -892,12 +898,12 @@ public class CryptoManager {
         }
     }
 
-    private void stroeAdditionalData(byte[] receiveBuffer, short inOffset, short receivingLength) {
+    private void storeAuthenticationData(byte[] receiveBuffer, short inOffset, short receivingLength) {
         if(receivingLength > TEMP_BUFFER_SIZE) {
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         }
         
-        mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] = Util.arrayCopyNonAtomic(receiveBuffer, inOffset, mTempBuffer, (short) 0,
+        mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = Util.arrayCopyNonAtomic(receiveBuffer, inOffset, mTempBuffer, (short) 0,
                 receivingLength);
     }
     
@@ -966,13 +972,13 @@ public class CryptoManager {
 
     public short decryptCredentialData(byte[] encryptedData, short offset, short length, byte[] outData,
             short outOffset) {
-        // Additional data needs to be sent first
-        if(mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH] == 0) {
+        // Authentication data needs to be sent first
+        if(mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] == 0) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); 
         }
         
         return decryptCredentialData(encryptedData, offset, length, mTempBuffer, (short) 0,
-                mStatusWords[STATUS_ENTRY_ADDDATA_LENGTH], outData, outOffset);
+                mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH], outData, outOffset);
     }
 
 

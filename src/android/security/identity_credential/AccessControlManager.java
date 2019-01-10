@@ -262,6 +262,6 @@ public class AccessControlManager {
 
     public boolean checkAccessPermission(byte[] pids, short offset, short length) {
         // TODO Auto-generated method stub
-        return false;
+        return true;
     }
 }

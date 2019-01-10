@@ -10,7 +10,7 @@ if !${personalizationSuccessful} && ${personalizationSuccessful} != 1
 end 
 
 ## Load the credential 
-/send 80300000#(${credHBK})00 9000
+/send 80300001#(${credHBK})00 9000
 
 ## Authenticate user 
 /send 80310002#(814401560900)00 9000
@@ -27,3 +27,13 @@ end
 /send 80310001#(83440011223358204F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4F4444556677)00 9000
 
 /send 80320000#(${secureACP3}) *9000
+
+/send 803A0000#(${namespace1})00 *9000
+/send 803B0000#(${entry1AddData})00 *9000
+/send 803B0100#(${encEntry1})00 *9000
+/send 803B0000#(${entry2AddData})00 *9000
+/send 803B0100#(${encEntry2})00 *9000
+/send 803B0000#(${entry3AddData})00 *9000
+/send 803B0100#(${encEntry3})00 *9000
+/send 803B0000#(${entry4AddData})00 *9000
+/send 803B0100#(${encEntry4})00 *9000
