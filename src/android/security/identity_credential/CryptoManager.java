@@ -230,16 +230,17 @@ public class CryptoManager {
         // Check P1P2
         if((buf[ISO7816.OFFSET_P1] & 0x80) == 0x80) { // Load the provided ephemeral keys
 
-            mCBORDecoder.init(buf, (short) 0, mAPDUManager.getReceivingLength());
+            mCBORDecoder.init(buf, mAPDUManager.getOffsetIncomingData(), mAPDUManager.getReceivingLength());
             mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
 
             // Start location of the public key
-            short ecPubKeyOffset = mCBORDecoder.getCurrentOffset();
-            short ecPubKeyLength = (short)(mCBORDecoder.skipEntry() - ecPubKeyOffset);
+            short ecPubKeyLength = mCBORDecoder.readLength();
+            short ecPubKeyOffset = mCBORDecoder.getCurrentOffsetAndIncrease(ecPubKeyLength);
 
-            short tagOffset = mCBORDecoder.getCurrentOffset();
+            mCBORDecoder.readLength();
+            short tagValueOffset = mCBORDecoder.getCurrentOffset();
 
-            if (!verifyAuthenticationTag(buf, ecPubKeyOffset, ecPubKeyLength, buf, tagOffset)) {
+            if (!verifyAuthenticationTag(buf, ecPubKeyOffset, ecPubKeyLength, buf, tagValueOffset)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             ((ECPublicKey) mEphemeralKeyPair.getPublic()).setW(buf, ecPubKeyOffset, ecPubKeyLength);
