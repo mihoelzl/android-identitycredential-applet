@@ -82,16 +82,31 @@ public class AccessControlManager {
         }
     }
     
-    public void setStatusFlag(byte statusFlag) {
+    /**
+     * Sets the status of the access control profile manager
+     */
+    private void setStatusFlag(byte statusFlag) {
         mStatusWords[VALUE_CURRENT_STATUS] = ICUtil.setBit((byte) mStatusWords[VALUE_CURRENT_STATUS], statusFlag, true);
     }
 
-    public boolean getStatusFlag(byte statusFlag) {
+    /** 
+     * Get the current status of the manager 
+     */
+    private boolean getStatusFlag(byte statusFlag) {
         return ICUtil.getBit((byte) mStatusWords[VALUE_CURRENT_STATUS], statusFlag);
     }
     
     
+    /**
+     * Add access control profile id to the verified id list. Access to entries that
+     * reference one of these ids will be granted.
+     * 
+     * @param pId New access control profile id
+     */
     private void addValidProfileId(byte pId) {
+        if(mStatusWords[VALUE_VALID_PROFILE_IDS] >= MAX_PROFILE_IDS) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
         mTempBuffer[(short)(BUFFERPOS_PROFILEIDS + mStatusWords[VALUE_VALID_PROFILE_IDS])] = pId;
         mStatusWords[VALUE_VALID_PROFILE_IDS]++;
     }
@@ -121,6 +136,9 @@ public class AccessControlManager {
 
     /**
      * Process the AUTHENTICATE command (validate encrypted access control profiles)
+     * 
+     * @param cryptoManager Reference to the cryptomanager that will get the session
+     *                      transcript if it is provided
      */
     private void processAuthenticate(CryptoManager cryptoManager) {
         short receivingLength = mAPDUManager.receiveAll();
@@ -180,7 +198,13 @@ public class AccessControlManager {
         }
     }
 
-    public boolean processLoadAccessControlProfile(CryptoManager cryptoManager) {
+    /**
+     * Process the LOAD ACCESS CONTROL PROFILE command. Will throw an exception if
+     * integrity check fails or the specified authentication criteria is not met.
+     * 
+     * @param cryptoManager Reference to the cryptomanager that performs the integrity check
+     */
+    public void processLoadAccessControlProfile(CryptoManager cryptoManager) {
         short receivingLength = mAPDUManager.receiveAll();
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         short inOffset = mAPDUManager.getOffsetIncomingData();
@@ -220,6 +244,10 @@ public class AccessControlManager {
                 
                 if(keyLength == LENGTH_MAPKEY_READERAUTHPUBKEY) { // No exact match check needed
                     // reader authentication, check if public key matches the authenticated pub key
+                    if (!getStatusFlag(STATUS_READER_AUTHENTICATED)) { // No reader authentication performed
+                        ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+                    }
+                    
                     // TODO: Handle public key certificate chain 
                     short readerKeyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
                     if (Util.arrayCompare(mTempBuffer, BUFFERPOS_READERKEY, receiveBuffer,
@@ -229,6 +257,9 @@ public class AccessControlManager {
                 }
                 
                 if(mCBORDecoder.getCurrentOffset() != tagOffset) { // more data --> user authentication 
+                    if (!getStatusFlag(STATUS_USER_AUTHENTICATED)) { // No user authentication performed
+                        ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+                    }
                     // userAuthType
                     short type = mCBORDecoder.readMajorType(CBORBase.TYPE_UNSIGNED_INTEGER);
                     
@@ -256,10 +287,17 @@ public class AccessControlManager {
         } catch (CryptoException e) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
-        
-        return true;
     }
 
+    /**
+     * Check if one of the given access control profile IDs have been successfully
+     * loaded and successfully verified.
+     * 
+     * @param pids Buffer that holds the profile IDs that should be checked. Each byte represents one profile
+     * @param offset Offset into the buffer
+     * @param length Length/Number of profile IDs 
+     * @return True if one of the profile IDs has been successfully authenticated.
+     */
     public boolean checkAccessPermission(byte[] pids, short offset, short length) {
         // We assume that the stored profile ids and the referenced pids are sorted
         short storedIds = (short) (BUFFERPOS_PROFILEIDS + mStatusWords[VALUE_VALID_PROFILE_IDS]);
