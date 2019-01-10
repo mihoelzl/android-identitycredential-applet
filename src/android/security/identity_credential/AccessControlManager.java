@@ -261,7 +261,22 @@ public class AccessControlManager {
     }
 
     public boolean checkAccessPermission(byte[] pids, short offset, short length) {
-        // TODO Auto-generated method stub
-        return true;
+        // We assume that the stored profile ids and the referenced pids are sorted
+        short storedIds = (short) (BUFFERPOS_PROFILEIDS + mStatusWords[VALUE_VALID_PROFILE_IDS]);
+        length = (short) (length+offset); // Add offset to length for faster check in loop
+        
+        short storedIdsStart = BUFFERPOS_PROFILEIDS;
+        
+        while(storedIdsStart < storedIds && offset < length) {
+            if (pids[offset] == mTempBuffer[storedIdsStart]) {
+                return true;
+            } else if (pids[offset] > mTempBuffer[storedIdsStart]) {
+                storedIdsStart++;
+            } else {
+                offset++;
+            }
+        }
+
+        return false;
     }
 }
