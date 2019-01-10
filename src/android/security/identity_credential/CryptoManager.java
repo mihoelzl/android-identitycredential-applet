@@ -226,33 +226,58 @@ public class CryptoManager {
     private void processCreateEphemeralKey() throws ISOException {
         mAPDUManager.receiveAll();
         byte[] buf = mAPDUManager.getReceiveBuffer();
-                
-        switch (Util.getShort(buf, ISO7816.OFFSET_P1)) {
-        case 0: // Do nothing
-            break;
-        case 1: // EC_NIST_P_256            
-            mAPDUManager.setOutgoing();
-            
-            // Create the ephemeral key
-            mEphemeralKeyPair.genKeyPair();
-            
-            // Keep the ephemeral key in the key object
-            short length = ((ECPublicKey) mEphemeralKeyPair.getPublic()).getW(mTempBuffer, (short) 0);
+        
+        // Check P1P2
+        if((buf[ISO7816.OFFSET_P1] & 0x80) == 0x80) { // Load the provided ephemeral keys
 
-            // Start the CBOR encoding of the output 
-            mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
-            mCBOREncoder.startArray((short) 2);
-            
-            mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
-            
-            // Get the private key and append it to the output
-            length = ((ECPrivateKey)mEphemeralKeyPair.getPrivate()).getS(mTempBuffer, (short)0);
-            mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
-            
-            mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
-            break;
-        default: 
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+            mCBORDecoder.init(buf, (short) 0, mAPDUManager.getReceivingLength());
+            mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
+
+            // Start location of the public key
+            short ecPubKeyOffset = mCBORDecoder.getCurrentOffset();
+            short ecPubKeyLength = (short)(mCBORDecoder.skipEntry() - ecPubKeyOffset);
+
+            short tagOffset = mCBORDecoder.getCurrentOffset();
+
+            if (!verifyAuthenticationTag(buf, ecPubKeyOffset, ecPubKeyLength, buf, tagOffset)) {
+                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
+            ((ECPublicKey) mEphemeralKeyPair.getPublic()).setW(buf, ecPubKeyOffset, ecPubKeyLength);
+        } else {
+            switch (Util.getShort(buf, ISO7816.OFFSET_P1)) {
+            case 0: // Do nothing
+                break;
+            case 1: // EC_NIST_P_256            
+                mAPDUManager.setOutgoing();
+                
+                // Create the ephemeral key
+                mEphemeralKeyPair.genKeyPair();
+                
+                // Keep the ephemeral key in the key object
+                short length = ((ECPublicKey) mEphemeralKeyPair.getPublic()).getW(mTempBuffer, (short) 0);
+    
+                // Start the CBOR encoding of the output 
+                mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
+                mCBOREncoder.startArray((short) 3);
+                
+                mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, length);
+                
+                // Get the private key and append it to the output
+                short encodedLocation = mCBOREncoder.startByteString(EC_KEY_SIZE);
+    
+                ((ECPrivateKey) mEphemeralKeyPair.getPrivate()).getS(mAPDUManager.getSendBuffer(), encodedLocation);
+                
+                // Get the private key and append it to the output
+                encodedLocation = mCBOREncoder.startByteString((short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
+                encryptCredentialData(mTempBuffer, (short) 0, (short) 0,  // No data input
+                        mTempBuffer, (short) 0, length, // Public key as auth data 
+                        mAPDUManager.getSendBuffer(), encodedLocation); // Output data
+                
+                mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
+                break;
+            default: 
+                ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+            }
         }
     }
 
@@ -431,7 +456,7 @@ public class CryptoManager {
         return false;
     }
     
-    public void processGetAttestationCertificate() {
+    private void processGetAttestationCertificate() {
         assertCredentialLoaded();
         // TODO implement
     }
@@ -974,7 +999,7 @@ public class CryptoManager {
             short outOffset) {
         // Authentication data needs to be sent first
         if(mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] == 0) {
-            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); 
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED); 
         }
         
         return decryptCredentialData(encryptedData, offset, length, mTempBuffer, (short) 0,
@@ -995,11 +1020,15 @@ public class CryptoManager {
     public boolean verifyAuthenticationTag(byte[] authData, short dataOffset, short dataLength, byte[] tag, short tagOffset) {
         assertCredentialLoaded();
 
-        encryptCredentialData(mTempBuffer, (short) 0, (short) 0,  // No data input
-                authData, dataOffset, dataLength, // Profile as auth data 
-                mTempBuffer, (short) 0); // Output data
+        CryptoBaseX.doFinal(mCredentialStorageKey, CryptoBaseX.ALG_AES_GCM, // Key information
+                Cipher.MODE_ENCRYPT, mTempBuffer, (short) 0, (short) 0,  // No data input
+                tag, tagOffset, AES_GCM_IV_SIZE, // IV
+                authData, dataOffset, dataLength, 
+                mTempBuffer, (short) 0, // Output location
+                mTempBuffer, AES_GCM_IV_SIZE, // Tag output
+                AES_GCM_TAG_SIZE);
         
-        return Util.arrayCompare(mTempBuffer, AES_GCM_IV_SIZE, tag, tagOffset, AES_GCM_TAG_SIZE) == 0;
+        return Util.arrayCompare(mTempBuffer, AES_GCM_IV_SIZE, tag, (short)(tagOffset+AES_GCM_IV_SIZE), AES_GCM_TAG_SIZE) == 0;
     }
     
     public boolean verifyEphemeralKey(byte[] ephKey, short offset, short length) {
