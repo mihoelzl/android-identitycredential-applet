@@ -1031,12 +1031,30 @@ public class CryptoManager {
         
         return Util.arrayCompare(mTempBuffer, AES_GCM_IV_SIZE, tag, (short)(tagOffset+AES_GCM_IV_SIZE), AES_GCM_TAG_SIZE) == 0;
     }
-    
-    public boolean verifyEphemeralKey(byte[] ephKey, short offset, short length) {
+
+    public boolean verifyReaderSignature(byte[] sessionTranscript, short transcriptOffset, short transcriptLen,
+            byte[] readerPubKey, short readerAuthPubKeyOffset, short readerAuthPubKeyLen, byte[] readerSignature,
+            short readerSignOffset, short readerSignLen) {
         assertInitializedEphemeralKeys();
+        boolean result = false;
         
-        ((ECPublicKey)mEphemeralKeyPair.getPublic()).getW(mTempBuffer, (short)0);
-        return Util.arrayCompare(ephKey, offset, mTempBuffer, (short)0, length) == 0;
+        // Get the current ephemeral key
+        ECPublicKey pubKey = ((ECPublicKey)mEphemeralKeyPair.getPublic());
+        short keyLen = pubKey.getW(mTempBuffer, (short)0);
+        // TODO verify that the eph key in session transcript
+        
+        try {
+            // Set the reader public key and verify
+            pubKey.setW(readerPubKey, readerAuthPubKeyOffset, readerAuthPubKeyLen);
+            mECSignature.init(pubKey, Signature.MODE_VERIFY);
+
+            result = mECSignature.verify(sessionTranscript, transcriptOffset, transcriptLen, readerSignature, readerSignOffset, readerSignLen);
+        } catch(CryptoException e) {
+            result = false;
+        }
+        // Reset the ephemeral key to the initial state
+        pubKey.setW(mTempBuffer, (short) 0, keyLen);
+        return result;
     }
     
     public void createSigningKeyAndWrap(byte[] outSigningBlob, short outOffset) {
@@ -1086,5 +1104,6 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
+
 
 }

@@ -8,7 +8,9 @@ selectApplet
 /send 8052000100 835841*5820*9000
 /set-var ephPubKey ${response;s2,134}
 /set-var mac ${response;s204,60}
+/set-var wrongmac ${response;s2,60}
 /send 8052000200 6A86 
 /send 80528001#(82${ephPubKey}${mac})00 9000
+/send 80528001#(82${ephPubKey}${wrongmac})00 6982
 
 #/close

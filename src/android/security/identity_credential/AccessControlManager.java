@@ -111,22 +111,8 @@ public class AccessControlManager {
         mStatusWords[VALUE_VALID_PROFILE_IDS]++;
     }
     
-    public boolean authenticateReader(byte[] sessionTranscript, short offset, short length, byte[] readerKey,
-            short readerKeyOffset, short readerKeyLength, byte[] rederSignature, short readerSignatureOffset,
-            short readerSignatureLength) {
-        
-        // TODO parse reader public key and ephemeral key from session transcript
-        // TODO verify the signature over transcript
-        // mCryptoManager.verifyReaderSignature()
-        
-        // TODO verify that the ephemeral key has not changed
-        // mCryptoManager.verifyEphemeralKey(holderPubKey, holderKeyOffset, holderKeyLength);
-
-        
-        return true;
-    }
-    
-    public boolean authenticateUser(byte[] authToken, short tokenOffset, short tokenLength) {
+    public boolean authenticateUser(byte[] challenge, short challengeOffset, short challengeLength, byte[] timestamp,
+            short timestampOffset, short timestampLen, byte[] authToken, short tokenOffset, short tokenLength) {
         // TODO: How to we verify the token?
         
         Util.arrayCopyNonAtomic(authToken, tokenOffset, mTempBuffer, BUFFERPOS_USERID, tokenLength);
@@ -167,11 +153,12 @@ public class AccessControlManager {
             short readerSignLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
             short readerSignOffset = mCBORDecoder.getCurrentOffsetAndIncrease(readerSignLen);
 
-            if (!authenticateReader(receiveBuffer, transcriptOffset, transcriptLen, receiveBuffer,
+            if (!cryptoManager.verifyReaderSignature(receiveBuffer, transcriptOffset, transcriptLen, receiveBuffer,
                     readerAuthPubKeyOffset, readerAuthPubKeyLen, receiveBuffer, readerSignOffset, readerSignLen)) {
+//            authenticateReader(receiveBuffer, transcriptOffset, transcriptLen, receiveBuffer,
+//                    readerAuthPubKeyOffset, readerAuthPubKeyLen, receiveBuffer, readerSignOffset, readerSignLen)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
-            
             if(!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
                 cryptoManager.startRetrievalSignature(receiveBuffer, transcriptOffset, transcriptLen);
                 setStatusFlag(STATUS_TRANSCRIPT_LOADED);
@@ -186,10 +173,17 @@ public class AccessControlManager {
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); // Already authenticated
             }
             
+            // Read parameter offset+length (keep them in place)
+            short challengeOffset = mCBORDecoder.getCurrentOffset();
+            short challengeLen = mCBORDecoder.readEncodedInteger(receiveBuffer, challengeOffset);
+            short timestampOffset = mCBORDecoder.getCurrentOffset();
+            short timestampLen = mCBORDecoder.readEncodedInteger(receiveBuffer, timestampOffset);
+
             len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
             short tokenOffset = mCBORDecoder.getCurrentOffsetAndIncrease(len);
 
-            if (!authenticateUser(receiveBuffer, tokenOffset, len)) {
+            if (!authenticateUser(receiveBuffer, challengeOffset, challengeLen, receiveBuffer, timestampOffset,
+                    timestampLen, receiveBuffer, tokenOffset, len)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             setStatusFlag(STATUS_USER_AUTHENTICATED);

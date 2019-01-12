@@ -144,14 +144,6 @@ public class CBORDecoder extends CBORBase{
         return 0; // Never reached
     }
     
-//    public static int readInt32(byte[] cborInput, short offset) {
-//        byte addInfo = (byte) (cborInput[offset] & ADDINFO_MASK);
-//        if(addInfo == FOUR_BYTES) {
-//            return JCint.getInt(cborInput, (short) (offset+1));  
-//        } 
-//        return -1;
-//    }
-
     public void readInt32(byte[] output, short offset) {
         final byte addInfo = (byte) (readRawByte() & ADDINFO_MASK);
         if (addInfo == ENCODED_FOUR_BYTES) {
@@ -178,14 +170,14 @@ public class CBORDecoder extends CBORBase{
             Util.arrayCopyNonAtomic(getBuffer(), getCurrentOffsetAndIncrease((short) (1 + size)), output,
                     (short) (offset), (short) size);
         }
-        return size;
+        return (short) (size & 0xFF);
     }
 
     public short readLength() {
         final byte size = getIntegerSize(); // Read length information
         short length = 0;
         if (size == 1) {
-            length = readInt8();
+            length = (short) (readInt8() & 0xFF);
         } else if (size == 2) {
             length = readInt16();
         } else { // length information above 4 bytes not supported
