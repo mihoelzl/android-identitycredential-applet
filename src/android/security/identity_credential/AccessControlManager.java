@@ -155,8 +155,6 @@ public class AccessControlManager {
 
             if (!cryptoManager.verifyReaderSignature(receiveBuffer, transcriptOffset, transcriptLen, receiveBuffer,
                     readerAuthPubKeyOffset, readerAuthPubKeyLen, receiveBuffer, readerSignOffset, readerSignLen)) {
-//            authenticateReader(receiveBuffer, transcriptOffset, transcriptLen, receiveBuffer,
-//                    readerAuthPubKeyOffset, readerAuthPubKeyLen, receiveBuffer, readerSignOffset, readerSignLen)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             if(!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {

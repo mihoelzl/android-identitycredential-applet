@@ -76,7 +76,7 @@ public class CryptoManager {
     private final KeyPair mCredentialECKeyPair;
 
     // KeyPair for ephemeral key generation
-    private final KeyPair mEphemeralKeyPair;
+    private final KeyPair mTempECKeyPair;
     
     // Signature object for creating and verifying credential signatures 
     private final Signature mECSignature;
@@ -135,15 +135,15 @@ public class CryptoManager {
                 (ECPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PUBLIC, KeyBuilder.LENGTH_EC_FP_256, false),
                 (ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE_TRANSIENT_DESELECT, KeyBuilder.LENGTH_EC_FP_256, false));
         
-        mEphemeralKeyPair = new KeyPair(
+        mTempECKeyPair = new KeyPair(
                 (ECPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PUBLIC, KeyBuilder.LENGTH_EC_FP_256, false),
                 (ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE_TRANSIENT_RESET, KeyBuilder.LENGTH_EC_FP_256, false));
 
         // At the moment we only support SEC-P256r1. Hence, can be configured at install time.
         Secp256r1.configureECKeyParameters((ECKey) mCredentialECKeyPair.getPrivate());
         Secp256r1.configureECKeyParameters((ECKey) mCredentialECKeyPair.getPublic());
-        Secp256r1.configureECKeyParameters((ECKey) mEphemeralKeyPair.getPrivate());
-        Secp256r1.configureECKeyParameters((ECKey) mEphemeralKeyPair.getPublic());
+        Secp256r1.configureECKeyParameters((ECKey) mTempECKeyPair.getPrivate());
+        Secp256r1.configureECKeyParameters((ECKey) mTempECKeyPair.getPublic());
 
         // Initialize the object for signing data using EC
         mECSignature = Signature.getInstance(Signature.ALG_ECDSA_SHA_256, false);
@@ -210,6 +210,7 @@ public class CryptoManager {
             processGetEntry();
             break;
         case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
+            processGenerateSigningKeyPair();
             break;            
         default: 
             ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
@@ -243,7 +244,7 @@ public class CryptoManager {
             if (!verifyAuthenticationTag(buf, ecPubKeyOffset, ecPubKeyLength, buf, tagValueOffset)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
-            ((ECPublicKey) mEphemeralKeyPair.getPublic()).setW(buf, ecPubKeyOffset, ecPubKeyLength);
+            ((ECPublicKey) mTempECKeyPair.getPublic()).setW(buf, ecPubKeyOffset, ecPubKeyLength);
         } else {
             switch (Util.getShort(buf, ISO7816.OFFSET_P1)) {
             case 0: // Do nothing
@@ -252,10 +253,10 @@ public class CryptoManager {
                 mAPDUManager.setOutgoing();
                 
                 // Create the ephemeral key
-                mEphemeralKeyPair.genKeyPair();
+                mTempECKeyPair.genKeyPair();
                 
                 // Keep the ephemeral key in the key object
-                short length = ((ECPublicKey) mEphemeralKeyPair.getPublic()).getW(mTempBuffer, (short) 0);
+                short length = ((ECPublicKey) mTempECKeyPair.getPublic()).getW(mTempBuffer, (short) 0);
     
                 // Start the CBOR encoding of the output 
                 mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
@@ -266,7 +267,7 @@ public class CryptoManager {
                 // Get the private key and append it to the output
                 short encodedLocation = mCBOREncoder.startByteString(EC_KEY_SIZE);
     
-                ((ECPrivateKey) mEphemeralKeyPair.getPrivate()).getS(mAPDUManager.getSendBuffer(), encodedLocation);
+                ((ECPrivateKey) mTempECKeyPair.getPrivate()).getS(mAPDUManager.getSendBuffer(), encodedLocation);
                 
                 // Get the private key and append it to the output
                 encodedLocation = mCBOREncoder.startByteString((short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
@@ -837,7 +838,8 @@ public class CryptoManager {
     }
     
     /**
-     * Process GET ENTRY command. Throws an exception if the credential is not initialized, access control denies entry retrieval or if decryption fails.
+     * Process GET ENTRY command. Throws an exception if the credential is not
+     * initialized, access control denies entry retrieval or if decryption fails.
      */
     private void processGetEntry() throws ISOException {
         assertCredentialLoaded();
@@ -1009,6 +1011,50 @@ public class CryptoManager {
 
 
     /**
+     * Process the GENERATE SIGNING KEY PAIR command. Throws an exception if the
+     * credential is not initialized. Returns the encrypted signing key and the
+     * x.509 certificate of the public signing key
+     */
+    private void processGenerateSigningKeyPair() {
+        assertCredentialLoaded();
+        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES);
+
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        
+        if (Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x01) {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+        
+        mAPDUManager.setOutgoing();
+
+        // Create the Signing key
+        mTempECKeyPair.genKeyPair();
+        
+        short keyLen = ((ECPrivateKey)mTempECKeyPair.getPrivate()).getS(mTempBuffer, (short)0);
+        
+        // Start the CBOR encoding of the output 
+        mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
+        mCBOREncoder.startArray((short) 2);
+        
+        short encodedLocation = mCBOREncoder.startByteString((short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE + keyLen));
+
+        // TODO(hoelzl) use doctype as authentication data?
+        encryptCredentialData(mTempBuffer, (short) 0, keyLen, mTempBuffer, (short) 0, (short) 0, mAPDUManager.getSendBuffer(), encodedLocation);
+        
+        short certLen = createSigningKeyCertificate((ECPublicKey) mTempECKeyPair.getPublic(), mTempBuffer,
+                (short) 0);
+        mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, certLen); 
+        
+        mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
+    }
+    
+    
+    public short createSigningKeyCertificate(ECPublicKey signingKey, byte[] outCertificateBuffer, short outOffset) {
+        //TODO: implement x509 certificate creation of public signing key
+        return 0;
+    }
+    
+    /**
      * Verify only the authentication tag of an entry that did not encrypt data.  
      *    
      * @param authData Buffer with the authentication data
@@ -1039,7 +1085,7 @@ public class CryptoManager {
         boolean result = false;
         
         // Get the current ephemeral key
-        ECPublicKey pubKey = ((ECPublicKey)mEphemeralKeyPair.getPublic());
+        ECPublicKey pubKey = ((ECPublicKey)mTempECKeyPair.getPublic());
         short keyLen = pubKey.getW(mTempBuffer, (short)0);
         // TODO verify that the eph key in session transcript
         
@@ -1057,24 +1103,6 @@ public class CryptoManager {
         return result;
     }
     
-    public void createSigningKeyAndWrap(byte[] outSigningBlob, short outOffset) {
-        //TODO: implement
-    }
-    
-    public void unwrapSigningBlob(byte[] signingBlob, short offset, short length) {
-        //TODO: implement
-    }
-    
-    public short createSigningKeyCertificate(byte[] outCertificateBuffer, short outOffset) {
-        //TODO: implement
-        return 0;
-    }
-    
-    public short signData(byte[] data, short offset, short length, byte[] outSignature, short outOffset) {
-        //TODO: implement
-        return 0;
-    }
-
     private void assertCredentialLoaded() {
         assertStatusFlagSet(FLAG_CREDENIAL_KEYS_INITIALIZED);
     }
@@ -1100,7 +1128,7 @@ public class CryptoManager {
     }
     
     private void assertInitializedEphemeralKeys() {
-        if (!mEphemeralKeyPair.getPublic().isInitialized() || !mEphemeralKeyPair.getPrivate().isInitialized()) {
+        if (!mTempECKeyPair.getPublic().isInitialized() || !mTempECKeyPair.getPrivate().isInitialized()) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
