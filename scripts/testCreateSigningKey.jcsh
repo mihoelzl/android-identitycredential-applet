@@ -1,0 +1,14 @@
+helperFunctions
+selectApplet
+
+/echo ############   GENERATE SIGNING KEY   ############
+
+/send 8010000000 
+/set-var credHBK ${response;s4,164}
+
+/atr
+selectApplet
+/send 80300000#(${credHBK})00 9000
+/send 8040000100 *9000
+
+#/close
