@@ -140,7 +140,7 @@ public class AccessControlManager {
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); // Already loaded
             }
             len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            cryptoManager.startRetrievalSignature(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
+            cryptoManager.startEntryRetrievalSigning(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
             setStatusFlag(STATUS_TRANSCRIPT_LOADED);
         } else if (p1p2 == 0x1) { // Reader authentication
             if (getStatusFlag(STATUS_READER_AUTHENTICATED)) {
@@ -158,7 +158,7 @@ public class AccessControlManager {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             if(!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
-                cryptoManager.startRetrievalSignature(receiveBuffer, transcriptOffset, transcriptLen);
+                cryptoManager.startEntryRetrievalSigning(receiveBuffer, transcriptOffset, transcriptLen);
                 setStatusFlag(STATUS_TRANSCRIPT_LOADED);
             }
             

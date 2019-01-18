@@ -497,7 +497,7 @@ public class CryptoManager {
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE)) {
             assertStatusFlagSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES); // Verify that namespaces aren't already personalized
 
-            startNamespaceInSignature(receiveBuffer, inOffset, receivingLength);
+            decodeNamespaceForSigning(receiveBuffer, inOffset, receivingLength);
             
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, true);
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
@@ -747,7 +747,8 @@ public class CryptoManager {
      * @param transcriptOffset
      * @param transcriptLen
      */
-    public void startRetrievalSignature(byte[] sessionTranscriptBuffer, short transcriptOffset, short transcriptLen) {
+    public void startEntryRetrievalSigning(byte[] sessionTranscriptBuffer, short transcriptOffset,
+            short transcriptLen) {
         assertCredentialLoaded();
                 
         mDigest.reset();
@@ -764,7 +765,7 @@ public class CryptoManager {
         keyLength = (short) (mCBOREncoder.startMap((short) 1) - keyOffset);
         mDigest.update(mTempBuffer, keyOffset, keyLength);
         
-        // TODO: add DocType
+        // TODO: add DocType to signature
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, true);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, false);
@@ -802,7 +803,7 @@ public class CryptoManager {
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE)) {
             assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES); // Verify that there are still missing namespaces
 
-            startNamespaceInSignature(receiveBuffer, inOffset, receivingLength);
+            decodeNamespaceForSigning(receiveBuffer, inOffset, receivingLength);
             
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, true);
             mDigest.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
@@ -820,7 +821,7 @@ public class CryptoManager {
      * @param inOffset Offset in the receiving buffer
      * @param receivingLength Length of the data in the receiving buffer
      */
-    private void startNamespaceInSignature(byte[] receiveBuffer, short inOffset, short receivingLength) {
+    private void decodeNamespaceForSigning(byte[] receiveBuffer, short inOffset, short receivingLength) {
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
 
@@ -1054,6 +1055,7 @@ public class CryptoManager {
         return 0;
     }
     
+
     /**
      * Verify only the authentication tag of an entry that did not encrypt data.  
      *    
@@ -1078,7 +1080,10 @@ public class CryptoManager {
         return Util.arrayCompare(mTempBuffer, AES_GCM_IV_SIZE, tag, (short)(tagOffset+AES_GCM_IV_SIZE), AES_GCM_TAG_SIZE) == 0;
     }
 
-    public boolean verifyReaderSignature(byte[] sessionTranscript, short transcriptOffset, short transcriptLen,
+    /**
+     * Verify the signature of the reader over the provided request data. Also verifies that the ephemeral key is inside the requestData.
+     */
+    public boolean verifyReaderSignature(byte[] requestData, short requDataOffset, short requDataLen,
             byte[] readerPubKey, short readerAuthPubKeyOffset, short readerAuthPubKeyLen, byte[] readerSignature,
             short readerSignOffset, short readerSignLen) {
         assertInitializedEphemeralKeys();
@@ -1094,7 +1099,7 @@ public class CryptoManager {
             pubKey.setW(readerPubKey, readerAuthPubKeyOffset, readerAuthPubKeyLen);
             mECSignature.init(pubKey, Signature.MODE_VERIFY);
 
-            result = mECSignature.verify(sessionTranscript, transcriptOffset, transcriptLen, readerSignature, readerSignOffset, readerSignLen);
+            result = mECSignature.verify(requestData, requDataOffset, requDataLen, readerSignature, readerSignOffset, readerSignLen);
         } catch(CryptoException e) {
             result = false;
         }
