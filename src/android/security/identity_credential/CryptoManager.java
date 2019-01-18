@@ -44,7 +44,8 @@ public class CryptoManager {
     private static final byte FLAG_CREDENIAL_PERSONALIZING_NAMESPACE = 5;
     private static final byte FLAG_CREDENIAL_RETRIEVAL_STARTED = 6;
     private static final byte FLAG_CREDENIAL_RETRIEVAL_ENTRIES = 7;
-    private static final byte FLAG_CREDENIAL_RETRIEVAL_NAMESPACE = 8;
+    private static final byte FLAG_CREDENIAL_RETRIEVAL_CHUNKED = 8;
+    private static final byte FLAG_CREDENIAL_RETRIEVAL_NAMESPACE = 9;
     private static final byte STATUS_FLAGS_SIZE = 2;
 
     private static final short TEMP_BUFFER_SIZE = 128;
@@ -62,6 +63,7 @@ public class CryptoManager {
     public static final byte AES_GCM_IV_SIZE = 12;
     public static final byte AES_GCM_TAG_SIZE = CryptoBaseX.AES_GCM_TAGLEN_128;
     public static final byte EC_KEY_SIZE = 32;
+    public static final byte DIGEST_SIZE = 32;
     
     // Hardware bound key, initialized during Applet installation
     private final AESKey mHBK;
@@ -211,7 +213,10 @@ public class CryptoManager {
             break;
         case ISO7816.INS_ICS_CREATE_SIGNING_KEY:
             processGenerateSigningKeyPair();
-            break;            
+            break;
+        case ISO7816.INS_ICS_CREATE_SIGNATURE:
+            processSignDataRequest();
+            break;
         default: 
             ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
         }
@@ -567,7 +572,6 @@ public class CryptoManager {
             
             // add map key "value" to the signature
             mECSignature.update(mTempBuffer, (short) 0, (short) mCBOREncoder.getCurrentOffset());
-            // add entrySize
             
             storeAuthenticationData(receiveBuffer, inOffset, receivingLength);
         } else { // Entry value in command data : encrypt and return 
@@ -799,7 +803,7 @@ public class CryptoManager {
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES, true);
         } 
         
-        // Check that current namespace is already finished with retrieveal
+        // Verify that current namespace is already finished with retrieval
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE)) {
             assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES); // Verify that there are still missing namespaces
 
@@ -885,7 +889,11 @@ public class CryptoManager {
                 mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = 0;
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
-        } else { // Entry value in command data : encrypt and return 
+        } else if (receivingLength != 0) { // Entry value in command data : decrypt and return
+            // Additional data needs to be sent first
+            if(mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] == 0) {
+                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); 
+            }
             
             // Decrypt and return
             short len = decryptCredentialData(receiveBuffer, inOffset, mAPDUManager.getReceivingLength(), outBuffer, (short) 0);
@@ -902,6 +910,10 @@ public class CryptoManager {
                 len -= dataOffset;
             }
             
+            // Indicate that data was successfully decrypted (required if a final
+            // command without data is sent)
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_CHUNKED, true); 
+            
             // Add the value to the signature
             mDigest.update(receiveBuffer, dataOffset, len);
             
@@ -909,7 +921,7 @@ public class CryptoManager {
         }
 
         // If first bit is set: this command was the last (or only) chunk
-        if ((entryStatus & 0x1) == 0x1) {
+        if ((entryStatus & 0x1) == 0x1 && ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_CHUNKED)) {
             mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = 0; // Reset entry information
             
             mStatusWords[STATUS_ENTRIES_IN_NAMESPACE]++;
@@ -1054,8 +1066,76 @@ public class CryptoManager {
         //TODO: implement x509 certificate creation of public signing key
         return 0;
     }
-    
 
+    private void processSignDataRequest() {
+        assertCredentialLoaded();
+        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES);
+
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
+
+        if (Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x00) {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+        
+        mAPDUManager.setOutgoing();
+        byte[] outBuffer = mAPDUManager.getSendBuffer();
+        
+        mCBORDecoder.init(receiveBuffer, (short) 0, receivingLength);
+        mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
+        
+        // Include the type and length information 
+        short previousHashOffset = mCBORDecoder.getCurrentOffset();
+        short previousHashLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+        mCBORDecoder.increaseOffset(previousHashLen);
+        
+        // Get the signing key blob location and length
+        short signingKeyBlobLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+        short signingKeyBlobOffset = mCBORDecoder.getCurrentOffsetAndIncrease(signingKeyBlobLen);
+        
+        if(previousHashLen != DIGEST_SIZE) {
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
+        
+
+        // Finish computing the new auditSignatureHash
+        mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+        
+        // responseHash : bstr
+        short hashLen = mDigest.doFinal(mTempBuffer, (short) 0, (short) 0, mTempBuffer,
+                mCBOREncoder.startByteString(DIGEST_SIZE));
+
+        mECSignature.update(mTempBuffer, (short) 0, hashLen);
+        
+        // previousAuditSignatureHash : bstr
+        mECSignature.update(receiveBuffer, previousHashOffset, previousHashLen);
+
+        // Add new signature to output
+        short signatureLen = mECSignature.sign(mTempBuffer, (short) 0, (short) 0, mTempBuffer, hashLen);
+        
+        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
+        mCBOREncoder.startArray((short) 2);
+        
+        mCBOREncoder.encodeByteString(mTempBuffer, hashLen, signatureLen);
+        
+        // TODO(hoelzl) use doctype as authentication data?
+        signingKeyBlobLen = decryptCredentialData(receiveBuffer, signingKeyBlobOffset, signingKeyBlobLen, mTempBuffer, (short) 0,
+                (short) 0, mTempBuffer, hashLen);
+
+        // Set the signing key
+        ECPrivateKey signingKey = ((ECPrivateKey) mTempECKeyPair.getPrivate());
+        signingKey.setS(mTempBuffer, hashLen, signingKeyBlobLen);
+
+        // Sign the actual request
+        mECSignature.init(signingKey, Signature.MODE_SIGN);
+        signatureLen = mECSignature.signPreComputedHash(mTempBuffer, (short) 0, hashLen, mTempBuffer, (short) 0);
+
+        mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, signatureLen);
+        
+        mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
+    }
+    
     /**
      * Verify only the authentication tag of an entry that did not encrypt data.  
      *    

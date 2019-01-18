@@ -100,13 +100,12 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             case ISO7816.INS_ICS_GET_ATTESTATION_CERT:       
             case ISO7816.INS_ICS_GET_NAMESPACE:              
             case ISO7816.INS_ICS_GET_ENTRY:        
+            case ISO7816.INS_ICS_CREATE_SIGNATURE:
                 mCryptoManager.process();
                 break;
             case ISO7816.INS_ICS_AUTHENTICATE:
             case ISO7816.INS_ICS_LOAD_ACCESS_CONTROL_PROFILE:
                 mAccessControlManager.process(mCryptoManager);
-                break;
-            case ISO7816.INS_ICS_CREATE_SIGNATURE:
                 break;
             case ISO7816.INS_ICS_TEST_CBOR:
                 processTestCBOR();
@@ -186,7 +185,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
         byte[] outBuff = mAPDUManager.getSendBuffer();
         Util.setShort(outBuff, (short) 0, (short) apdu.getBuffer().length);
         Util.setShort(outBuff, (short) 2, APDUManager.MAXCHUNKSIZE);
-        Util.setShort(outBuff, (short)4, mCryptoManager.getAESKeySize());
+        Util.setShort(outBuff, (short) 4, mCryptoManager.getAESKeySize());
 
         mAPDUManager.setOutgoingLength((short) 6);
         mAPDUManager.sendAll();

@@ -119,7 +119,36 @@ public class AccessControlManager {
         
         return true;
     }
+    
+    private boolean verifyUserACP(byte[] receiveBuffer) {
+        if (!getStatusFlag(STATUS_USER_AUTHENTICATED)) { // No user authentication performed
+            return false;
+        }
 
+        short typeLen = mCBORDecoder.getIntegerSize();
+        if(typeLen <= 2) { 
+            mCBORDecoder.readMajorType(CBORBase.TYPE_UNSIGNED_INTEGER);
+        } else {
+            mCBORDecoder.increaseOffset((short) (1 + typeLen));
+        }
+        // userSecureId
+        mCBORDecoder.increaseOffset(mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING)); // key
+        
+        short secureIdSize = mCBORDecoder.getIntegerSize();
+        if(secureIdSize == 1) { // Handle special case of 1 byte integers, which is not supported
+            return false;
+        } else {
+            mCBORDecoder.increaseOffset((short) 1); // jump to actual value
+            
+            if (Util.arrayCompare(mTempBuffer, BUFFERPOS_USERID, receiveBuffer ,
+                    mCBORDecoder.getCurrentOffsetAndIncrease(secureIdSize), secureIdSize) != 0) {
+                return false;
+            }
+        }
+        // TODO: check timeout + type
+        return true;
+    }
+    
     /**
      * Process the AUTHENTICATE command (validate encrypted access control profiles)
      * 
@@ -136,29 +165,28 @@ public class AccessControlManager {
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         short len = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
         if (p1p2 == 0x0) { // No authentication, just the session transcript
-            if (getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
-                ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); // Already loaded
+            if (!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
+                len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+                cryptoManager.startEntryRetrievalSigning(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
+                setStatusFlag(STATUS_TRANSCRIPT_LOADED);
             }
-            len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            cryptoManager.startEntryRetrievalSigning(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
-            setStatusFlag(STATUS_TRANSCRIPT_LOADED);
         } else if (p1p2 == 0x1) { // Reader authentication
             if (getStatusFlag(STATUS_READER_AUTHENTICATED)) {
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); // Already authenticated
             }
-            short transcriptLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-            short transcriptOffset = mCBORDecoder.getCurrentOffsetAndIncrease(transcriptLen);
+            short readerAuthDataLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+            short readerAuthDataOffset = mCBORDecoder.getCurrentOffsetAndIncrease(readerAuthDataLen);
             short readerAuthPubKeyLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
             short readerAuthPubKeyOffset = mCBORDecoder.getCurrentOffsetAndIncrease(readerAuthPubKeyLen);
             short readerSignLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
             short readerSignOffset = mCBORDecoder.getCurrentOffsetAndIncrease(readerSignLen);
 
-            if (!cryptoManager.verifyReaderSignature(receiveBuffer, transcriptOffset, transcriptLen, receiveBuffer,
+            if (!cryptoManager.verifyReaderSignature(receiveBuffer, readerAuthDataOffset, readerAuthDataLen, receiveBuffer,
                     readerAuthPubKeyOffset, readerAuthPubKeyLen, receiveBuffer, readerSignOffset, readerSignLen)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             if(!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
-                cryptoManager.startEntryRetrievalSigning(receiveBuffer, transcriptOffset, transcriptLen);
+                cryptoManager.startEntryRetrievalSigning(receiveBuffer, readerAuthDataOffset, readerAuthDataLen);
                 setStatusFlag(STATUS_TRANSCRIPT_LOADED);
             }
             
@@ -237,9 +265,10 @@ public class AccessControlManager {
             
             if (mapSize >= 2) {
                 short keyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
-                mCBORDecoder.increaseOffset(keyLength);
                 
-                if(keyLength == LENGTH_MAPKEY_READERAUTHPUBKEY) { // No exact match check needed
+                if (keyLength == (short) ICConstants.CBOR_MAPKEY_READERAUTHKEY.length) {
+                    mCBORDecoder.increaseOffset(keyLength);
+                    
                     // reader authentication, check if public key matches the authenticated pub key
                     if (!getStatusFlag(STATUS_READER_AUTHENTICATED)) { // No reader authentication performed
                         ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
@@ -251,31 +280,22 @@ public class AccessControlManager {
                             mCBORDecoder.getCurrentOffsetAndIncrease(readerKeyLength), readerKeyLength) != 0) {
                         ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                     }
-                }
-                
-                if(mCBORDecoder.getCurrentOffset() != tagOffset) { // more data --> user authentication 
-                    if (!getStatusFlag(STATUS_USER_AUTHENTICATED)) { // No user authentication performed
-                        ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
-                    }
-                    // userAuthType
-                    short type = mCBORDecoder.readMajorType(CBORBase.TYPE_UNSIGNED_INTEGER);
-                    
-                    // userSecureId
-                    keyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
-                    mCBORDecoder.increaseOffset(keyLength);
-                    short secureIdSize = mCBORDecoder.getIntegerSize();
-                    if(secureIdSize == 1) { // Handle special case of 1 byte integers, which is not supported
-                        ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
-                    } else {
-                        mCBORDecoder.increaseOffset((short) 1); // jump to actual value
+                    if(mCBORDecoder.getCurrentOffset() != tagOffset) { // more data --> user authentication
+                        keyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
+                        mCBORDecoder.increaseOffset(keyLength);
                         
-                        if (Util.arrayCompare(mTempBuffer, BUFFERPOS_USERID, receiveBuffer ,
-                                mCBORDecoder.getCurrentOffsetAndIncrease(secureIdSize), secureIdSize) != 0) {
+                        if (!verifyUserACP(receiveBuffer)) {
                             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                         }
                     }
+                } else if (keyLength == (short) ICConstants.CBOR_MAPKEY_CAPABILITYTYPE.length) { // user authentication 
+                    mCBORDecoder.increaseOffset(keyLength);
                     
-                    // TODO: check timeout + type
+                    if (!verifyUserACP(receiveBuffer)) {
+                        ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+                    }
+                } else {
+                    ISOException.throwIt(ISO7816.SW_DATA_INVALID);
                 }
             } 
             // All authentications validated (or no authentication was required for this profile)
