@@ -5,4 +5,5 @@ testCreateEphemeralKey
 testCreateCredential
 testLoadCredential
 testPersonalizeCredential
+testCreateSigningKey
 testGetEntries

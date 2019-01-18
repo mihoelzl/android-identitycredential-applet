@@ -167,7 +167,7 @@ public class AccessControlManager {
         if (p1p2 == 0x0) { // No authentication, just the session transcript
             if (!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
                 len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-                cryptoManager.startEntryRetrievalSigning(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
+                cryptoManager.setReaderAuthenticationData(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
                 setStatusFlag(STATUS_TRANSCRIPT_LOADED);
             }
         } else if (p1p2 == 0x1) { // Reader authentication
@@ -186,7 +186,7 @@ public class AccessControlManager {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             if(!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
-                cryptoManager.startEntryRetrievalSigning(receiveBuffer, readerAuthDataOffset, readerAuthDataLen);
+                cryptoManager.setReaderAuthenticationData(receiveBuffer, readerAuthDataOffset, readerAuthDataLen);
                 setStatusFlag(STATUS_TRANSCRIPT_LOADED);
             }
             
@@ -266,7 +266,7 @@ public class AccessControlManager {
             if (mapSize >= 2) {
                 short keyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
                 
-                if (keyLength == (short) ICConstants.CBOR_MAPKEY_READERAUTHKEY.length) {
+                if (keyLength == (short) ICConstants.CBOR_MAPKEY_READERAUTHPUBKEY.length) {
                     mCBORDecoder.increaseOffset(keyLength);
                     
                     // reader authentication, check if public key matches the authenticated pub key

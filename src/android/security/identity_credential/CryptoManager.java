@@ -139,7 +139,7 @@ public class CryptoManager {
         
         mTempECKeyPair = new KeyPair(
                 (ECPublicKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PUBLIC, KeyBuilder.LENGTH_EC_FP_256, false),
-                (ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE_TRANSIENT_RESET, KeyBuilder.LENGTH_EC_FP_256, false));
+                (ECPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_EC_FP_PRIVATE_TRANSIENT_DESELECT, KeyBuilder.LENGTH_EC_FP_256, false));
 
         // At the moment we only support SEC-P256r1. Hence, can be configured at install time.
         Secp256r1.configureECKeyParameters((ECKey) mCredentialECKeyPair.getPrivate());
@@ -176,6 +176,7 @@ public class CryptoManager {
         
         mCredentialStorageKey.clearKey();
         mCredentialECKeyPair.getPrivate().clearKey();
+        Secp256r1.configureECKeyParameters((ECKey) mCredentialECKeyPair.getPrivate());
     }
     
     public void process() {
@@ -741,32 +742,99 @@ public class CryptoManager {
 
 
     /**
-     * Starts the signature for entry retrieval. The structure of this
+     * Starts entry retrieval and initiates signature creation for retrieval and auditLogData. 
+     * The structure of signature for retrieval:
      * signature is: 
      *  AuthenticatedData = { 
      *      "SessionTranscript" : any, 
      *      "Response" : { DocType => { + Namespace => DataItems } } }
+     * Structure of AuditLogData
+     *  AuditLogData = [
+     *          "AuditLogEntry",
+     *          requestHash : bstr,
+     *          responseHash: bstr,
+     *          previousAuditSignatureHash : bstr
+     *     ]
      * 
-     * @param sessionTranscriptBuffer 
-     * @param transcriptOffset
-     * @param transcriptLen
+     * @param readerAuthDataBuffer 
+     * @param readerAuthDataOffset
+     * @param readerAuthDataLen
      */
-    public void startEntryRetrievalSigning(byte[] sessionTranscriptBuffer, short transcriptOffset,
-            short transcriptLen) {
+    public void setReaderAuthenticationData(final byte[] readerAuthDataBuffer, final short readerAuthDataOffset,
+            final short readerAuthDataLen) {
         assertCredentialLoaded();
+        assertInitializedCredentialKeys();
+
+        // Find the sessionTranscript and RequestData in readerAuthDataBuffer
+        mCBORDecoder.init(readerAuthDataBuffer, readerAuthDataOffset, readerAuthDataLen);
+        
+        short elements = mCBORDecoder.readMajorType(CBORBase.TYPE_MAP);
+        short transcriptOffset = -1, transcriptLen = -1;
+        short requestDataOffset = -1;
+        short keyLen = 0;
+
+        for (; elements > 0; elements--) {
+            if (mCBORDecoder.getMajorType() != CBORBase.TYPE_TEXT_STRING) {
+                mCBORDecoder.skipEntry(); // key
+                mCBORDecoder.skipEntry(); // value
+                continue;
+            } 
+            keyLen = mCBORDecoder.readLength();
+
+            if (transcriptOffset == -1 && keyLen == (short) ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT.length
+                    && Util.arrayCompare(readerAuthDataBuffer, mCBORDecoder.getCurrentOffset(),
+                            ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT, (short) 0, keyLen) == 0) {
+                mCBORDecoder.increaseOffset(keyLen);
+
+                transcriptOffset = mCBORDecoder.getCurrentOffset();
+                // TODO search for ephemeral key
+                mCBORDecoder.skipEntry();
                 
+                transcriptLen = (short) (mCBORDecoder.getCurrentOffset() - transcriptOffset);
+            } else if (requestDataOffset == -1 && keyLen == (short) ICConstants.CBOR_MAPKEY_REQUEST.length
+                    && Util.arrayCompare(readerAuthDataBuffer, mCBORDecoder.getCurrentOffset(),
+                            ICConstants.CBOR_MAPKEY_REQUEST, (short) 0, keyLen) == 0) {
+                mCBORDecoder.increaseOffset(keyLen);
+                
+                requestDataOffset = mCBORDecoder.getCurrentOffset();
+                // TODO store Namespace/DataItemNames
+                mCBORDecoder.skipEntry();
+            } else {
+                mCBORDecoder.increaseOffset(keyLen);
+                mCBORDecoder.skipEntry();
+            }
+        }
+        if (requestDataOffset == -1 || transcriptOffset == -1) {
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
+        
+        // Signature for AuditLogData
+        mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
+        mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+        mCBOREncoder.startArray((short)4);
+
+        // Add "AuditLogEntry
+        mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_AUDITLOGENTRY, (short) 0, (short) ICConstants.CBOR_MAPKEY_AUDITLOGENTRY.length);
+        
+        // Add requestHash
+        mDigest.reset();
+        mDigest.doFinal(readerAuthDataBuffer, readerAuthDataOffset, readerAuthDataOffset, mTempBuffer, mCBOREncoder.startByteString(DIGEST_SIZE));
+        mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+        // responseHash and previousAdutiSignatureHash will be added in processSignDataRequest
+        
+        // Signature for AuthenticatedData
         mDigest.reset();
         
         short keyOffset = 0;
         mCBOREncoder.init(mTempBuffer, keyOffset, TEMP_BUFFER_SIZE);
-        short keyLength = mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT, (short) 0, (short) ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT.length);
+        mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT, (short) 0, (short) ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT.length);
         
-        mDigest.update(mTempBuffer, keyOffset, keyLength);
-        mDigest.update(sessionTranscriptBuffer, transcriptOffset, transcriptLen);
+        mDigest.update(mTempBuffer, keyOffset, mCBOREncoder.getCurrentOffset());
+        mDigest.update(readerAuthDataBuffer, transcriptOffset, transcriptLen);
         
         keyOffset = mCBOREncoder.getCurrentOffset();
         mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_RESPONSE, (short) 0, (short) ICConstants.CBOR_MAPKEY_RESPONSE.length);
-        keyLength = (short) (mCBOREncoder.startMap((short) 1) - keyOffset);
+        short keyLength = (short) (mCBOREncoder.startMap((short) 1) - keyOffset);
         mDigest.update(mTempBuffer, keyOffset, keyLength);
         
         // TODO: add DocType to signature
@@ -895,9 +963,15 @@ public class CryptoManager {
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); 
             }
             
-            // Decrypt and return
-            short len = decryptCredentialData(receiveBuffer, inOffset, mAPDUManager.getReceivingLength(), outBuffer, (short) 0);
-
+            short len = 0;
+            try {
+                // Decrypt and return
+                len = decryptCredentialData(receiveBuffer, inOffset, mAPDUManager.getReceivingLength(), outBuffer,
+                        (short) 0);
+            } catch (CryptoException e) {
+                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
+            
             short dataOffset = (short) 0;
             mCBORDecoder.init(outBuffer, dataOffset, len);
             
@@ -1062,7 +1136,7 @@ public class CryptoManager {
     }
     
     
-    public short createSigningKeyCertificate(ECPublicKey signingKey, byte[] outCertificateBuffer, short outOffset) {
+    private short createSigningKeyCertificate(ECPublicKey signingKey, byte[] outCertificateBuffer, short outOffset) {
         //TODO: implement x509 certificate creation of public signing key
         return 0;
     }
@@ -1082,7 +1156,12 @@ public class CryptoManager {
         mAPDUManager.setOutgoing();
         byte[] outBuffer = mAPDUManager.getSendBuffer();
         
-        mCBORDecoder.init(receiveBuffer, (short) 0, receivingLength);
+        // Input is encoded as createSignature = [
+        //        bstr,   ; previousAuditSignatureHash
+        //        bstr    ; signingKeyBlob 
+        //   ]
+
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
         
         // Include the type and length information 
@@ -1098,7 +1177,6 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
         
-
         // Finish computing the new auditSignatureHash
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
         
@@ -1109,31 +1187,36 @@ public class CryptoManager {
         mECSignature.update(mTempBuffer, (short) 0, hashLen);
         
         // previousAuditSignatureHash : bstr
-        mECSignature.update(receiveBuffer, previousHashOffset, previousHashLen);
-
-        // Add new signature to output
-        short signatureLen = mECSignature.sign(mTempBuffer, (short) 0, (short) 0, mTempBuffer, hashLen);
-        
+        // Compute new auditSignatureHash and append to output
+        short signatureLen = mECSignature.sign(receiveBuffer, previousHashOffset, previousHashLen, mTempBuffer,
+                hashLen);
+ 
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
         mCBOREncoder.startArray((short) 2);
         
         mCBOREncoder.encodeByteString(mTempBuffer, hashLen, signatureLen);
         
-        // TODO(hoelzl) use doctype as authentication data?
-        signingKeyBlobLen = decryptCredentialData(receiveBuffer, signingKeyBlobOffset, signingKeyBlobLen, mTempBuffer, (short) 0,
-                (short) 0, mTempBuffer, hashLen);
-
-        // Set the signing key
-        ECPrivateKey signingKey = ((ECPrivateKey) mTempECKeyPair.getPrivate());
-        signingKey.setS(mTempBuffer, hashLen, signingKeyBlobLen);
-
-        // Sign the actual request
-        mECSignature.init(signingKey, Signature.MODE_SIGN);
-        signatureLen = mECSignature.signPreComputedHash(mTempBuffer, (short) 0, hashLen, mTempBuffer, (short) 0);
-
-        mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, signatureLen);
+        try {
+            // Decrypt signing key
+            // TODO(hoelzl) use doctype as authentication data?
+            signingKeyBlobLen = decryptCredentialData(receiveBuffer, signingKeyBlobOffset, signingKeyBlobLen, mTempBuffer, (short) 0,
+                    (short) 0, mTempBuffer, hashLen);
+    
+            // Set the signing key
+            ECPrivateKey signingKey = ((ECPrivateKey) mTempECKeyPair.getPrivate());
+            signingKey.setS(mTempBuffer, hashLen, signingKeyBlobLen);
+    
+            // Sign the actual request (precomputed hash in digest object -> see above)
+            mECSignature.init(signingKey, Signature.MODE_SIGN);
+            signatureLen = mECSignature.signPreComputedHash(mTempBuffer, (short) 0, hashLen, mTempBuffer, (short) 0);
+    
+            mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, signatureLen);
+            
+            mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
+        } catch (CryptoException e) {
+            ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
         
-        mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
     }
     
     /**
@@ -1207,7 +1290,7 @@ public class CryptoManager {
     }
 
     private void assertInitializedCredentialKeys() {
-        if (!mCredentialECKeyPair.getPublic().isInitialized() || !mCredentialECKeyPair.getPrivate().isInitialized()) {
+        if (!mCredentialECKeyPair.getPrivate().isInitialized()) {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
