@@ -49,6 +49,8 @@ public class CryptoManager {
     private static final byte STATUS_FLAGS_SIZE = 2;
 
     private static final short TEMP_BUFFER_SIZE = 128;
+    private static final short TEMP_BUFFER_DOCTYPE_POS = TEMP_BUFFER_SIZE;
+    private static final short TEMP_BUFFER_DOCTYPE_MAXSIZE = 64;
 
     private static final byte STATUS_PROFILES_TOTAL = 0;
     private static final byte STATUS_PROFILES_PERSONALIZED = 1;
@@ -57,7 +59,8 @@ public class CryptoManager {
     private static final byte STATUS_ENTRY_AUTHDATA_LENGTH = 4;
     private static final byte STATUS_NAMESPACES_ADDED = 5;
     private static final byte STATUS_NAMESPACES_TOTAL = 6;
-    private static final byte STATUS_WORDS = 7;
+    private static final byte STATUS_DOCTYPE_LEN = 7;
+    private static final byte STATUS_WORDS = 8;
     
     public static final byte AES_GCM_KEY_SIZE = 16; 
     public static final byte AES_GCM_IV_SIZE = 12;
@@ -113,7 +116,8 @@ public class CryptoManager {
 
 
     public CryptoManager(APDUManager apduManager, AccessControlManager accessControlManager, CBORDecoder decoder, CBOREncoder encoder) {
-        mTempBuffer = JCSystem.makeTransientByteArray((short)TEMP_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
+        mTempBuffer = JCSystem.makeTransientByteArray((short) (TEMP_BUFFER_SIZE + TEMP_BUFFER_DOCTYPE_MAXSIZE),
+                JCSystem.CLEAR_ON_DESELECT);
 
         mStatusFlags = JCSystem.makeTransientByteArray((short)(STATUS_FLAGS_SIZE), JCSystem.CLEAR_ON_DESELECT);
         mStatusWords = JCSystem.makeTransientShortArray(STATUS_WORDS, JCSystem.CLEAR_ON_DESELECT);
@@ -311,13 +315,13 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
         
-        // Encoding the output as [ bstr, bstr ]
-        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
-        mCBOREncoder.startArray((short) 2);
-
-        // TODO: need to change this to first signature over auditLogHash
-        mCBOREncoder.encodeBoolean(false); // Placeholder for auditLogHash
+        if (receivingLength == 0) {
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
         
+        // Encoding the output as bstr
+        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
+
         short outOffset = mCBOREncoder.startByteString((short) (4 // CBOR structure with 5 bytes = 1 array start + 1 STK bstr + 2 CRK bstr   
                 + AES_GCM_IV_SIZE + AES_GCM_KEY_SIZE + EC_KEY_SIZE + AES_GCM_TAG_SIZE));
 
@@ -338,7 +342,7 @@ public class CryptoManager {
         // Return credentialBlob and start signature creation
         try {
             // encrypt storage key and credential key for returning
-            outOffset += wrapCredentialBlob(encryptionKey, outBuffer, outOffset);
+            outOffset += wrapCredentialBlob(encryptionKey, receiveBuffer, inOffset, receivingLength, outBuffer, outOffset);
             
             // Initialize the signature creation object
             mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
@@ -366,7 +370,8 @@ public class CryptoManager {
      * @param outOffset         Offset in the buffer
      * @return Bytes written in the output buffer
      */
-    private short wrapCredentialBlob(AESKey encryptionKey, byte[] outCredentialBlob, short outOffset) throws CryptoException {
+    private short wrapCredentialBlob(AESKey encryptionKey, byte[] docType, short docTypeOffset, short docTypeLen,
+            byte[] outCredentialBlob, short outOffset) throws CryptoException {
         // Encoder for the CredentialKeys blob
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
         // Encode an array consisting of [storageKey, credentialPrivKey]
@@ -386,7 +391,7 @@ public class CryptoManager {
         return (short) (CryptoBaseX.doFinal(encryptionKey, CryptoBaseX.ALG_AES_GCM, // Key information
                 Cipher.MODE_ENCRYPT, mTempBuffer, (short) 0, dataLength, // Data (keys)
                 outCredentialBlob, outOffset, AES_GCM_IV_SIZE, // IV
-                mTempBuffer, (short) 0, (short) 0, // authData empty
+                docType, docTypeOffset, docTypeLen, 
                 outCredentialBlob, (short) (outOffset + AES_GCM_IV_SIZE), // Output location
                 outCredentialBlob, (short) (outOffset + AES_GCM_IV_SIZE + dataLength), // Tag output
                 AES_GCM_TAG_SIZE) + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE); 
@@ -403,12 +408,7 @@ public class CryptoManager {
         
         AESKey encryptionKey = mHBK; 
 
-        // Check if it is a test credential
-        if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) == 0x1) { // Test credential
-            ICUtil.setBit(mStatusFlags, FLAG_TEST_CREDENTIAL, true);
-
-            encryptionKey = mTestKey;
-        } else if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x0) {
+        if(Util.getShort(receiveBuffer, ISO7816.OFFSET_P1) != 0x0) {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
         
@@ -417,13 +417,30 @@ public class CryptoManager {
                 ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);    
             }
             mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
+            mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
             
-            short bstLen;
-            if((bstLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING)) < 0){
+            short strLen = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
+            
+            // Save DocType
+            Util.arrayCopyNonAtomic(receiveBuffer,
+                    mCBORDecoder.getCurrentOffsetAndIncrease(strLen), mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, strLen);
+            mStatusWords[STATUS_DOCTYPE_LEN] = strLen;
+            
+            if (mCBORDecoder.readBoolean()) {
+                // Test credential
+                encryptionKey = mTestKey;
+                ICUtil.setBit(mStatusFlags, FLAG_TEST_CREDENTIAL, true);
+            } else {
+                ICUtil.setBit(mStatusFlags, FLAG_TEST_CREDENTIAL, false);
+            }
+            
+            // Read credential keys
+            if((strLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING)) <= 0){
                 ISOException.throwIt(ISO7816.SW_DATA_INVALID);    
             }
             
-            if(!unwrapCredentialBlob(encryptionKey, receiveBuffer, mCBORDecoder.getCurrentOffset(), bstLen)) {
+            if (!unwrapCredentialBlob(encryptionKey, receiveBuffer, mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, mStatusWords[STATUS_DOCTYPE_LEN], mCBORDecoder.getCurrentOffsetAndIncrease(strLen),
+                    strLen)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
         } catch(CryptoException e) {
@@ -431,11 +448,12 @@ public class CryptoManager {
         }
     }
     
-    private boolean unwrapCredentialBlob(AESKey encryptionKey, byte[] credentialBlob, short offset, short length) throws CryptoException{
+    private boolean unwrapCredentialBlob(AESKey encryptionKey, byte[] credentialBlob, byte[] docType,
+            short docTypeOffset, short docTypeLen, short offset, short length) throws CryptoException {
         short outLen = CryptoBaseX.doFinal(encryptionKey, CryptoBaseX.ALG_AES_GCM, Cipher.MODE_DECRYPT, // Key information
                 credentialBlob, (short) (offset + AES_GCM_IV_SIZE), (short) (length - AES_GCM_IV_SIZE - AES_GCM_TAG_SIZE), // Data
                 credentialBlob, offset, AES_GCM_IV_SIZE, // IV
-                mTempBuffer, (short) 0, (short) 0, // authData empty
+                docType, docTypeOffset, docTypeLen, // AuthData
                 mTempBuffer, (short) 0, // Output location
                 credentialBlob, (short) (offset + length - AES_GCM_TAG_SIZE), // Tag input
                 AES_GCM_TAG_SIZE); 
@@ -808,12 +826,12 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
         
-        // Signature for AuditLogData
+        // Create structure for AuditLogData and add it to the signature
         mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
         mCBOREncoder.startArray((short)4);
 
-        // Add "AuditLogEntry
+        // Add "AuditLogEntry"
         mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_AUDITLOGENTRY, (short) 0, (short) ICConstants.CBOR_MAPKEY_AUDITLOGENTRY.length);
         
         // Add requestHash
@@ -822,22 +840,27 @@ public class CryptoManager {
         mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
         // responseHash and previousAdutiSignatureHash will be added in processSignDataRequest
         
-        // Signature for AuthenticatedData
+        // Create structure for AuthenticatedData and add it to the digest object
         mDigest.reset();
         
-        short keyOffset = 0;
-        mCBOREncoder.init(mTempBuffer, keyOffset, TEMP_BUFFER_SIZE);
+        // Add {"SessionTranscript" : any
+        mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+        mCBOREncoder.startMap((short) 2);
         mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT, (short) 0, (short) ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT.length);
         
-        mDigest.update(mTempBuffer, keyOffset, mCBOREncoder.getCurrentOffset());
+        mDigest.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
         mDigest.update(readerAuthDataBuffer, transcriptOffset, transcriptLen);
         
-        keyOffset = mCBOREncoder.getCurrentOffset();
+        // Add "Response" : {
+        mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
         mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_RESPONSE, (short) 0, (short) ICConstants.CBOR_MAPKEY_RESPONSE.length);
-        short keyLength = (short) (mCBOREncoder.startMap((short) 1) - keyOffset);
-        mDigest.update(mTempBuffer, keyOffset, keyLength);
+        mCBOREncoder.startMap((short) 1);
         
-        // TODO: add DocType to signature
+        // Add docType
+        mCBOREncoder.encodeTextString(mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, mStatusWords[STATUS_DOCTYPE_LEN]);        
+        
+        mDigest.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+        
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, true);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, false);
@@ -858,7 +881,8 @@ public class CryptoManager {
 
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
 
-        if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES) && mStatusWords[STATUS_NAMESPACES_ADDED] == 0) {
+        if (!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES)
+                && mStatusWords[STATUS_NAMESPACES_ADDED] == 0) {
             // First namespace get the total number of namespaces from P1(lower 4 bits) + P2
             mStatusWords[STATUS_NAMESPACES_TOTAL] = (short) ((((short) receiveBuffer[ISO7816.OFFSET_P1] & 0x0F) << 8)
                     + receiveBuffer[ISO7816.OFFSET_P2]);
@@ -1013,13 +1037,20 @@ public class CryptoManager {
         }
     }
 
-    private void storeAuthenticationData(byte[] receiveBuffer, short inOffset, short receivingLength) {
-        if(receivingLength > TEMP_BUFFER_SIZE) {
+    /**
+     * Save the authentication data of an entry into the temporary buffer. 
+     * 
+     * @param authDataBuffer
+     * @param authDataOffset
+     * @param authDataLength
+     */
+    private void storeAuthenticationData(byte[] authDataBuffer, short authDataOffset, short authDataLength) {
+        if(authDataLength > TEMP_BUFFER_SIZE) {
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         }
-        
-        mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = Util.arrayCopyNonAtomic(receiveBuffer, inOffset, mTempBuffer, (short) 0,
-                receivingLength);
+
+        mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = authDataLength;
+        Util.arrayCopyNonAtomic(authDataBuffer, authDataOffset, mTempBuffer, (short) 0, authDataLength);
     }
     
 
@@ -1192,9 +1223,10 @@ public class CryptoManager {
                 hashLen);
  
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
-        mCBOREncoder.startArray((short) 2);
-        
+        mCBOREncoder.startArray((short) 3);
+
         mCBOREncoder.encodeByteString(mTempBuffer, hashLen, signatureLen);
+        mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, hashLen);
         
         try {
             // Decrypt signing key

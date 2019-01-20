@@ -10,7 +10,7 @@ if !${personalizationSuccessful} && ${personalizationSuccessful} != 1
 end 
 
 ## Load the credential 
-/send 80300001#(${credHBK})00 9000
+/send 80300000#(837818${docType}F5${credHBK})00 9000
 
 ## Create ephemeral key
 /send 8052000100 835841*5820*9000

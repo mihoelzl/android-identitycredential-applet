@@ -40,8 +40,6 @@ public class AccessControlManager {
     private static final short BUFFERPOS_USERID = BUFFERPOS_READERKEY + 65;
     private static final short BUFFERPOS_PROFILEIDS = BUFFERPOS_USERID + MAX_USER_ID_LENGTH;
     private static final short TEMPBUFFER_SIZE = BUFFERPOS_PROFILEIDS + MAX_PROFILE_IDS;
-
-    private static final byte LENGTH_MAPKEY_READERAUTHPUBKEY = 16;
     
     private final short[] mStatusWords;
     

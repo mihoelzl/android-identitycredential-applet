@@ -1,14 +1,15 @@
 helperFunctions
 selectApplet
+loadTestData
 
 /echo ############   GENERATE SIGNING KEY   ############
 
-/send 8010000000 
-/set-var credHBK ${response;s4,164}
+/send 80100000#(${docType}) 
+/set-var credHBK ${response;s0,164}
 
 /atr
 selectApplet
-/send 80300000#(${credHBK})00 9000
+/send 80300000#(837818${docType}F4${credHBK})00 9000
 /send 8040000100 82583C*9000
 
 #/close

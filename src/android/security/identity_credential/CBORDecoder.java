@@ -185,7 +185,23 @@ public class CBORDecoder extends CBORBase{
         }
         return length;
     }
-        
+
+    /**
+     * Reads a boolean at the current location (offset will be increased).
+     */
+    public boolean readBoolean() {
+        byte b = readRawByte(); 
+        if (b == ENCODED_TRUE) {
+            return true;
+        } else if (b == ENCODED_FALSE) {
+            return false;            
+        } else {
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
+        // Never happen
+        return true;
+    }
+    
     /**
      * Read a byte string at the current location and copy it into the given buffer
      * (offset will be increased).
