@@ -42,15 +42,24 @@ sendDataInChain 31 00 01 8358BBA27153657373696F6E5472616E73637269707482504141414
 /set-var secureACP4 82${accessProfile4}${encProfile4}
 /send 80320000#(${secureACP4}) *9000
 
-/send 803A0001#(${namespace1GetSuccess})00 *9000
+/send 803A0002#(${namespace1GetSuccess})00 *9000
 /send 803B0000#(${entry1AddData})00 *9000
 /send 803B0100#(${encEntry1})00 *9000
 /send 803B0000#(${entry2AddData})00 *9000
+/send 803B0100#(${encEntry3})00 *6982  # Decryption should fail
 /send 803B0100#(${encEntry2})00 *9000
 /send 803B0000#(${entry3AddData})00 *6982
 /send 803B0100#(${encEntry3})00 *6985
 /send 803B0000#(${entry4AddData})00 *9000
 /send 803B0100#(${encEntry4})00 *9000
+
+/send 803A0002#(${namespace2})00 *9000
+/send 803B0000#(${entry5AddData})00 *9000
+sendDataInChain 3B 04 00 ${encryptedChunk1} 9000
+sendDataInChain 3B 06 00 ${encryptedChunk2} 9000
+sendDataInChain 3B 06 00 ${encryptedChunk3} 9000
+sendDataInChain 3B 06 00 ${encryptedChunk4} 9000
+sendDataInChain 3B 07 00 ${encryptedChunk5} 9000
 
 /send 8040000100 82583C*9000
 signingKeyBlob=${response;s6,120} 

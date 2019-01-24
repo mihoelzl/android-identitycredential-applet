@@ -56,6 +56,7 @@ public class APDUManager {
         mStatusValues = JCSystem.makeTransientShortArray(STATUS_VALUES_SIZE, JCSystem.CLEAR_ON_DESELECT);
         mStatusFlags = JCSystem.makeTransientByteArray(STATUS_FLAGS_SIZE, JCSystem.CLEAR_ON_DESELECT);
         
+        // TODO: evaluate if we should use flash memory for the large buffer
         mLargeSendAndRecvBuffer = JCSystem.makeTransientByteArray((short) (LARGEBUFFERSIZE + cryptoHeaderOverhead),
                 JCSystem.CLEAR_ON_DESELECT);
     }
@@ -122,12 +123,13 @@ public class APDUManager {
         // More APDUs coming, store the full data (e.g. picture) in flash 
         if (apdu.isCommandChainingCLA()) {
             if (!ICUtil.getBit(mStatusFlags, FLAG_APDU_RECEIVE_MOREDATA)) {
-                // First command
-                Util.arrayCopyNonAtomic(buf, ISO7816.OFFSET_CLA, mLargeSendAndRecvBuffer, ISO7816.OFFSET_CLA, (short)(ISO7816.OFFSET_EXT_CDATA - ISO7816.OFFSET_CLA));    
+                // First command, note: we do not copy the length field but store it in a separate status word
+                Util.arrayCopyNonAtomic(buf, ISO7816.OFFSET_CLA, mLargeSendAndRecvBuffer, ISO7816.OFFSET_CLA, ISO7816.OFFSET_LC);    
 
                 ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVE_MOREDATA, true);
                 
                 mStatusValues[VALUE_INCOMING_LENGTH] = 0;
+                mStatusValues[VALUE_INCOMING_DATA_OFFSET] = ISO7816.OFFSET_LC;
             }
             receiveAll();
             
@@ -171,6 +173,7 @@ public class APDUManager {
      * common large buffer when support was enabled in setOutgoing
      */
     public byte[] getSendBuffer() {
+        // This is actually only necessary if we would use flash memory for large buffer  
         if(ICUtil.getBit(mStatusFlags, FLAG_APDU_OUTGOING_LARGEBUFFER)) {
             return mLargeSendAndRecvBuffer;
         }
@@ -237,8 +240,8 @@ public class APDUManager {
                 // Large data, copy into large receiving buffer
                 
                 // New offset = general data offset + already received data
-                short newDataOffset = (short) (receiveOffset + getReceivingLength()); 
-                if ((short) (newDataOffset + bytesReceived) > LARGEBUFFERSIZE) {
+                short newDataOffset = (short) (getOffsetIncomingData() + getReceivingLength()); 
+                if ((short) (newDataOffset + bytesReceived) > (short) mLargeSendAndRecvBuffer.length) {
                     ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
                 }
                 
@@ -246,9 +249,8 @@ public class APDUManager {
                 mStatusValues[VALUE_INCOMING_LENGTH] += lc;
             } else {
                 mStatusValues[VALUE_INCOMING_LENGTH] = lc;
-            }
-            
-            mStatusValues[VALUE_INCOMING_DATA_OFFSET] = receiveOffset;                
+                mStatusValues[VALUE_INCOMING_DATA_OFFSET] = receiveOffset;      
+            }         
             
             ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED, true);
             
@@ -289,7 +291,6 @@ public class APDUManager {
         return mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH];
     }
 
-    
     /**
      * Set the length of the outgoing APDU
      */

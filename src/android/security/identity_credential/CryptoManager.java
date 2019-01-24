@@ -19,6 +19,7 @@ package android.security.identity_credential;
 
 import com.nxp.id.jcopx.security.CryptoBaseX;
 
+import javacard.framework.APDU;
 import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
@@ -49,8 +50,9 @@ public class CryptoManager {
     private static final byte STATUS_FLAGS_SIZE = 2;
 
     private static final short TEMP_BUFFER_SIZE = 128;
-    private static final short TEMP_BUFFER_DOCTYPE_POS = TEMP_BUFFER_SIZE;
     private static final short TEMP_BUFFER_DOCTYPE_MAXSIZE = 64;
+    private static final short TEMP_BUFFER_DOCTYPE_POS = TEMP_BUFFER_SIZE;
+    private static final short TEMP_BUFFER_IV_POS = TEMP_BUFFER_DOCTYPE_POS + TEMP_BUFFER_DOCTYPE_MAXSIZE;
 
     private static final byte STATUS_PROFILES_TOTAL = 0;
     private static final byte STATUS_PROFILES_PERSONALIZED = 1;
@@ -116,7 +118,7 @@ public class CryptoManager {
 
 
     public CryptoManager(APDUManager apduManager, AccessControlManager accessControlManager, CBORDecoder decoder, CBOREncoder encoder) {
-        mTempBuffer = JCSystem.makeTransientByteArray((short) (TEMP_BUFFER_SIZE + TEMP_BUFFER_DOCTYPE_MAXSIZE),
+        mTempBuffer = JCSystem.makeTransientByteArray((short) (TEMP_BUFFER_SIZE + TEMP_BUFFER_DOCTYPE_MAXSIZE + AES_GCM_IV_SIZE),
                 JCSystem.CLEAR_ON_DESELECT);
 
         mStatusFlags = JCSystem.makeTransientByteArray((short)(STATUS_FLAGS_SIZE), JCSystem.CLEAR_ON_DESELECT);
@@ -279,7 +281,7 @@ public class CryptoManager {
     
                 ((ECPrivateKey) mTempECKeyPair.getPrivate()).getS(mAPDUManager.getSendBuffer(), encodedLocation);
                 
-                // Get the private key and append it to the output
+                // Compute the mac of the public key and append it to the output
                 encodedLocation = mCBOREncoder.startByteString((short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE));
                 encryptCredentialData(mTempBuffer, (short) 0, (short) 0,  // No data input
                         mTempBuffer, (short) 0, length, // Public key as auth data 
@@ -618,8 +620,8 @@ public class CryptoManager {
             mECSignature.update(receiveBuffer, dataOffset, dataLength);
             
             // Encrypt and return
-            short len = encryptCredentialData(receiveBuffer, inOffset, mAPDUManager.getReceivingLength(), mTempBuffer, (short) 0,
-                    mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH], outBuffer, (short) 0);
+            short len = encryptCredentialData(receiveBuffer, inOffset, mAPDUManager.getReceivingLength(), mTempBuffer,
+                    (short) 0, mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH], outBuffer, (short) 0);
             
             mAPDUManager.setOutgoingLength(len);
         }
@@ -734,7 +736,6 @@ public class CryptoManager {
 
         byte[] buf = mAPDUManager.getReceiveBuffer();
 
-        
         // Check P1P2
         if(Util.getShort(buf, ISO7816.OFFSET_P1) != 0x0) {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
@@ -777,54 +778,12 @@ public class CryptoManager {
      * @param readerAuthDataBuffer 
      * @param readerAuthDataOffset
      * @param readerAuthDataLen
+     * @return True or false, indicating if the reader authentication data is valid or not
      */
     public void setReaderAuthenticationData(final byte[] readerAuthDataBuffer, final short readerAuthDataOffset,
-            final short readerAuthDataLen) {
+            final short readerAuthDataLen, final short transcriptOffset, final short transcriptLen) {
         assertCredentialLoaded();
         assertInitializedCredentialKeys();
-
-        // Find the sessionTranscript and RequestData in readerAuthDataBuffer
-        mCBORDecoder.init(readerAuthDataBuffer, readerAuthDataOffset, readerAuthDataLen);
-        
-        short elements = mCBORDecoder.readMajorType(CBORBase.TYPE_MAP);
-        short transcriptOffset = -1, transcriptLen = -1;
-        short requestDataOffset = -1;
-        short keyLen = 0;
-
-        for (; elements > 0; elements--) {
-            if (mCBORDecoder.getMajorType() != CBORBase.TYPE_TEXT_STRING) {
-                mCBORDecoder.skipEntry(); // key
-                mCBORDecoder.skipEntry(); // value
-                continue;
-            } 
-            keyLen = mCBORDecoder.readLength();
-
-            if (transcriptOffset == -1 && keyLen == (short) ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT.length
-                    && Util.arrayCompare(readerAuthDataBuffer, mCBORDecoder.getCurrentOffset(),
-                            ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT, (short) 0, keyLen) == 0) {
-                mCBORDecoder.increaseOffset(keyLen);
-
-                transcriptOffset = mCBORDecoder.getCurrentOffset();
-                // TODO search for ephemeral key
-                mCBORDecoder.skipEntry();
-                
-                transcriptLen = (short) (mCBORDecoder.getCurrentOffset() - transcriptOffset);
-            } else if (requestDataOffset == -1 && keyLen == (short) ICConstants.CBOR_MAPKEY_REQUEST.length
-                    && Util.arrayCompare(readerAuthDataBuffer, mCBORDecoder.getCurrentOffset(),
-                            ICConstants.CBOR_MAPKEY_REQUEST, (short) 0, keyLen) == 0) {
-                mCBORDecoder.increaseOffset(keyLen);
-                
-                requestDataOffset = mCBORDecoder.getCurrentOffset();
-                // TODO store Namespace/DataItemNames
-                mCBORDecoder.skipEntry();
-            } else {
-                mCBORDecoder.increaseOffset(keyLen);
-                mCBORDecoder.skipEntry();
-            }
-        }
-        if (requestDataOffset == -1 || transcriptOffset == -1) {
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
-        }
         
         // Create structure for AuditLogData and add it to the signature
         mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
@@ -864,7 +823,6 @@ public class CryptoManager {
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, true);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, false);
-        
     }
 
     /**
@@ -954,7 +912,7 @@ public class CryptoManager {
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
 
         byte entryStatus = (byte) (receiveBuffer[ISO7816.OFFSET_P1] & 0x7); // Get status of entry personalization
-
+        
         if (entryStatus == 0x0) { // Start entry: Additional data in command data
             // AdditionalData is encoded as map {namespace, name, accessControlProfileIds}
 
@@ -967,13 +925,13 @@ public class CryptoManager {
             mCBORDecoder.skipEntry(); // Skip "name" 
             short nameOffset = mCBORDecoder.getCurrentOffset();
             short nameLength = (short) (mCBORDecoder.skipEntry() - nameOffset);
-            
+
             // Add the actual name to the signature
             mDigest.update(receiveBuffer, nameOffset, nameLength);
 
             mCBORDecoder.skipEntry(); // Skip "AccessControlProfileIds"
             short nrOfPids = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
-            
+
             if (mAccessControlManager.checkAccessPermission(receiveBuffer, mCBORDecoder.getCurrentOffset(), nrOfPids)) {
                 // Remember the whole additional data field for the data entry decryption 
                 storeAuthenticationData(receiveBuffer, inOffset, receivingLength);
@@ -986,7 +944,7 @@ public class CryptoManager {
             if(mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] == 0) {
                 ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED); 
             }
-            
+
             short len = 0;
             try {
                 // Decrypt and return
@@ -1016,6 +974,8 @@ public class CryptoManager {
             mDigest.update(receiveBuffer, dataOffset, len);
             
             mAPDUManager.setOutgoingLength(len);
+        } else {
+            mAPDUManager.setOutgoingLength((short) 0);
         }
 
         // If first bit is set: this command was the last (or only) chunk
@@ -1074,15 +1034,20 @@ public class CryptoManager {
         assertCredentialLoaded();
         
         // Generate the IV
-        mRandomData.generateData(outBuffer, (short) outOffset, (short) AES_GCM_IV_SIZE);
+        mRandomData.generateData(mTempBuffer, TEMP_BUFFER_IV_POS, (short) AES_GCM_IV_SIZE);
         
-        return (short) (CryptoBaseX.doFinal(mCredentialStorageKey, CryptoBaseX.ALG_AES_GCM, // Key information
+        short len = CryptoBaseX.doFinal(mCredentialStorageKey, CryptoBaseX.ALG_AES_GCM, // Key information
                 Cipher.MODE_ENCRYPT, data, offset, length, // Data
-                outBuffer, outOffset, AES_GCM_IV_SIZE, // IV
-                authData, authDataOffset, authLen, // authData empty
-                outBuffer, (short) (outOffset + AES_GCM_IV_SIZE), // Output location
+                mTempBuffer, TEMP_BUFFER_IV_POS, AES_GCM_IV_SIZE, // IV
+                authData, authDataOffset, authLen, // authData 
+                outBuffer, (short) (outOffset), // Output location
                 outBuffer, (short) (outOffset + AES_GCM_IV_SIZE + length), // Tag output
-                AES_GCM_TAG_SIZE) + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE);
+                AES_GCM_TAG_SIZE);
+        
+        // Copy the IV to the end of the outbuffer
+        Util.arrayCopyNonAtomic(mTempBuffer, TEMP_BUFFER_IV_POS, outBuffer, (short) (outOffset + length), AES_GCM_IV_SIZE);
+        
+        return (short) (len + AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE);
     }
     
     /**
@@ -1108,8 +1073,8 @@ public class CryptoManager {
         }
         
         return (short) (CryptoBaseX.doFinal(mCredentialStorageKey, CryptoBaseX.ALG_AES_GCM, Cipher.MODE_DECRYPT, // Key information
-                encryptedData, (short) (offset + AES_GCM_IV_SIZE), (short) (length - AES_GCM_IV_SIZE - AES_GCM_TAG_SIZE), // Data
-                encryptedData, offset, AES_GCM_IV_SIZE, // IV
+                encryptedData, (short) (offset), (short) (length - AES_GCM_IV_SIZE - AES_GCM_TAG_SIZE), // Data
+                encryptedData, (short) (offset + length - AES_GCM_IV_SIZE - AES_GCM_TAG_SIZE), AES_GCM_IV_SIZE, // IV
                 authData, authDataOffset, authLen, // authData 
                 outData, outOffset, // Output location
                 encryptedData, (short) (offset + length - AES_GCM_TAG_SIZE), // Tag location
@@ -1278,7 +1243,7 @@ public class CryptoManager {
     /**
      * Verify the signature of the reader over the provided request data. Also verifies that the ephemeral key is inside the requestData.
      */
-    public boolean verifyReaderSignature(byte[] requestData, short requDataOffset, short requDataLen,
+    public boolean verifyReaderSignature(byte[] readerAuthData, short readerAuthDataOffset, short readerAuthDataLen,
             byte[] readerPubKey, short readerAuthPubKeyOffset, short readerAuthPubKeyLen, byte[] readerSignature,
             short readerSignOffset, short readerSignLen) {
         assertInitializedEphemeralKeys();
@@ -1287,14 +1252,14 @@ public class CryptoManager {
         // Get the current ephemeral key
         ECPublicKey pubKey = ((ECPublicKey)mTempECKeyPair.getPublic());
         short keyLen = pubKey.getW(mTempBuffer, (short)0);
-        // TODO verify that the eph key in session transcript
         
         try {
             // Set the reader public key and verify
             pubKey.setW(readerPubKey, readerAuthPubKeyOffset, readerAuthPubKeyLen);
             mECSignature.init(pubKey, Signature.MODE_VERIFY);
 
-            result = mECSignature.verify(requestData, requDataOffset, requDataLen, readerSignature, readerSignOffset, readerSignLen);
+            result = mECSignature.verify(readerAuthData, readerAuthDataOffset, readerAuthDataLen, readerSignature,
+                    readerSignOffset, readerSignLen);
         } catch(CryptoException e) {
             result = false;
         }

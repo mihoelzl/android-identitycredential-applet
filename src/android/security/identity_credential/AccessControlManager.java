@@ -35,9 +35,10 @@ public class AccessControlManager {
 
     private static final byte MAX_USER_ID_LENGTH = 8;
     private static final byte MAX_PROFILE_IDS = 127;
-    
-    private static final short BUFFERPOS_READERKEY = 0;
-    private static final short BUFFERPOS_USERID = BUFFERPOS_READERKEY + 65;
+    private static final byte MAX_READERKEY_SIZE = 65;
+
+    private static final short BUFFERPOS_READERKEY = 0; 
+    private static final short BUFFERPOS_USERID = BUFFERPOS_READERKEY + MAX_READERKEY_SIZE;
     private static final short BUFFERPOS_PROFILEIDS = BUFFERPOS_USERID + MAX_USER_ID_LENGTH;
     private static final short TEMPBUFFER_SIZE = BUFFERPOS_PROFILEIDS + MAX_PROFILE_IDS;
     
@@ -138,13 +139,64 @@ public class AccessControlManager {
         } else {
             mCBORDecoder.increaseOffset((short) 1); // jump to actual value
             
-            if (Util.arrayCompare(mTempBuffer, BUFFERPOS_USERID, receiveBuffer ,
+            if (Util.arrayCompare(mTempBuffer, BUFFERPOS_USERID, receiveBuffer,
                     mCBORDecoder.getCurrentOffsetAndIncrease(secureIdSize), secureIdSize) != 0) {
                 return false;
             }
         }
         // TODO: check timeout + type
         return true;
+    }
+
+    public void parseRequestData(CryptoManager cryptoManager, final byte[] readerAuthDataBuffer, final short readerAuthDataOffset,
+            final short readerAuthDataLen) {
+
+        // Find the sessionTranscript and RequestData in readerAuthDataBuffer
+        mCBORDecoder.init(readerAuthDataBuffer, readerAuthDataOffset, readerAuthDataLen);
+        
+        short elements = mCBORDecoder.readMajorType(CBORBase.TYPE_MAP);
+        short transcriptOffset = -1, transcriptLen = -1;
+        short requestDataOffset = -1;
+        short ephKeyOffset = -1, ephKeyLen = -1;
+        short keyLen = 0;
+
+        for (; elements > 0; elements--) {
+            if (mCBORDecoder.getMajorType() != CBORBase.TYPE_TEXT_STRING) {
+                mCBORDecoder.skipEntry(); // key
+                mCBORDecoder.skipEntry(); // value
+                continue;
+            } 
+            keyLen = mCBORDecoder.readLength();
+
+            if (transcriptOffset == -1 && keyLen == (short) ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT.length
+                    && Util.arrayCompare(readerAuthDataBuffer, mCBORDecoder.getCurrentOffset(),
+                            ICConstants.CBOR_MAPKEY_SESSIONTRANSCRIPT, (short) 0, keyLen) == 0) {
+                mCBORDecoder.increaseOffset(keyLen);
+
+                transcriptOffset = mCBORDecoder.getCurrentOffset();
+                // TODO search for ephemeral key
+                mCBORDecoder.skipEntry();
+                
+                transcriptLen = (short) (mCBORDecoder.getCurrentOffset() - transcriptOffset);
+            } else if (requestDataOffset == -1 && keyLen == (short) ICConstants.CBOR_MAPKEY_REQUEST.length
+                    && Util.arrayCompare(readerAuthDataBuffer, mCBORDecoder.getCurrentOffset(),
+                            ICConstants.CBOR_MAPKEY_REQUEST, (short) 0, keyLen) == 0) {
+                mCBORDecoder.increaseOffset(keyLen);
+                
+                requestDataOffset = mCBORDecoder.getCurrentOffset();
+                // TODO store Namespace/DataItemNames
+                mCBORDecoder.skipEntry();
+            } else {
+                mCBORDecoder.increaseOffset(keyLen);
+                mCBORDecoder.skipEntry();
+            }
+        }
+        if (requestDataOffset == -1 || transcriptOffset == -1) {
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID); // Missing data
+        }
+        
+        // Inform the cryptomanager about the reader authentication data (for signature)
+        cryptoManager.setReaderAuthenticationData(readerAuthDataBuffer, readerAuthDataOffset, readerAuthDataLen, transcriptOffset, transcriptLen);
     }
     
     /**
@@ -165,7 +217,7 @@ public class AccessControlManager {
         if (p1p2 == 0x0) { // No authentication, just the session transcript
             if (!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
                 len = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-                cryptoManager.setReaderAuthenticationData(receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
+                parseRequestData(cryptoManager, receiveBuffer, mCBORDecoder.getCurrentOffsetAndIncrease(len), len);
                 setStatusFlag(STATUS_TRANSCRIPT_LOADED);
             }
         } else if (p1p2 == 0x1) { // Reader authentication
@@ -179,12 +231,14 @@ public class AccessControlManager {
             short readerSignLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
             short readerSignOffset = mCBORDecoder.getCurrentOffsetAndIncrease(readerSignLen);
 
-            if (!cryptoManager.verifyReaderSignature(receiveBuffer, readerAuthDataOffset, readerAuthDataLen, receiveBuffer,
-                    readerAuthPubKeyOffset, readerAuthPubKeyLen, receiveBuffer, readerSignOffset, readerSignLen)) {
+            // TODO: Handle public key certificate chain
+            if (readerAuthPubKeyLen > MAX_READERKEY_SIZE || !cryptoManager.verifyReaderSignature(receiveBuffer,
+                    readerAuthDataOffset, readerAuthDataLen, receiveBuffer, readerAuthPubKeyOffset, readerAuthPubKeyLen,
+                    receiveBuffer, readerSignOffset, readerSignLen)) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
-            if(!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
-                cryptoManager.setReaderAuthenticationData(receiveBuffer, readerAuthDataOffset, readerAuthDataLen);
+            if (!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
+                parseRequestData(cryptoManager, receiveBuffer, readerAuthDataOffset, readerAuthDataLen);
                 setStatusFlag(STATUS_TRANSCRIPT_LOADED);
             }
             
@@ -274,11 +328,12 @@ public class AccessControlManager {
                     
                     // TODO: Handle public key certificate chain 
                     short readerKeyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-                    if (Util.arrayCompare(mTempBuffer, BUFFERPOS_READERKEY, receiveBuffer,
-                            mCBORDecoder.getCurrentOffsetAndIncrease(readerKeyLength), readerKeyLength) != 0) {
+                    if (readerKeyLength > MAX_READERKEY_SIZE
+                            || Util.arrayCompare(mTempBuffer, BUFFERPOS_READERKEY, receiveBuffer,
+                                    mCBORDecoder.getCurrentOffsetAndIncrease(readerKeyLength), readerKeyLength) != 0) {
                         ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                     }
-                    if(mCBORDecoder.getCurrentOffset() != tagOffset) { // more data --> user authentication
+                    if(mCBORDecoder.getCurrentOffset() != tagOffset) { // more data --> reader + user authentication
                         keyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
                         mCBORDecoder.increaseOffset(keyLength);
                         
