@@ -1305,6 +1305,9 @@ public class CryptoManager {
         return false;
     }
 
+    /**
+     * Static ephemeral key for testing
+     */
     private static final byte[] TESTEPH_KEY = new byte[] { (byte) 0x04, (byte) 0x0E, (byte) 0xFE, (byte) 0x2F,
             (byte) 0x68, (byte) 0xC2, (byte) 0xA6, (byte) 0xB2, (byte) 0x15, (byte) 0xA0, (byte) 0x13, (byte) 0xFF,
             (byte) 0xB4, (byte) 0xDC, (byte) 0xAB, (byte) 0x62, (byte) 0x0F, (byte) 0xE0, (byte) 0xCE, (byte) 0xCE,
