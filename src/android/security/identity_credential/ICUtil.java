@@ -112,4 +112,15 @@ public class ICUtil {
     public static boolean isLessThanAsUnsignedShort(short n1, short n2) {
         return (n1 < n2) ^ ((n1 < 0) != (n2 < 0));
     }
+    
+    /**
+     * Fill a provided short array with a given value.
+     */
+    public static short shortArrayFillNonAtomic(short[] buffer, short offset, short len, short value) {
+        len += offset;
+        for (; offset < len; offset++) {
+            buffer[offset] = value;
+        }
+        return offset;
+    }
 }

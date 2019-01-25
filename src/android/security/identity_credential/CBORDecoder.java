@@ -17,15 +17,12 @@
 
 package android.security.identity_credential;
 
-import javacard.framework.APDU;
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
 import javacard.framework.Util;
-import javacardx.framework.math.BigNumber;
 
 public class CBORDecoder extends CBORBase{
 
-    
     /**
      * Return the current major type (does not increase buffer location)
      * 
@@ -198,7 +195,7 @@ public class CBORDecoder extends CBORBase{
         } else {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
-        // Never happen
+        // Never happens
         return true;
     }
     

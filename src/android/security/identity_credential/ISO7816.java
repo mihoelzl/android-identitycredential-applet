@@ -51,4 +51,9 @@ public interface ISO7816 extends javacard.framework.ISO7816 {
      * Instruction bytes for standard ISO7816-4 commands 
      */
     public static final byte INS_GET_RESPONSE = (byte) 0xC0;
+    
+    /**
+     * Error messages
+     */
+    public static final short SW_INSUFFICIENT_MEMORY = (short) 0x6A84;
 }

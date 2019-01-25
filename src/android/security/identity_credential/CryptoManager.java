@@ -19,7 +19,6 @@ package android.security.identity_credential;
 
 import com.nxp.id.jcopx.security.CryptoBaseX;
 
-import javacard.framework.APDU;
 import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
@@ -62,7 +61,8 @@ public class CryptoManager {
     private static final byte STATUS_NAMESPACES_ADDED = 5;
     private static final byte STATUS_NAMESPACES_TOTAL = 6;
     private static final byte STATUS_DOCTYPE_LEN = 7;
-    private static final byte STATUS_WORDS = 8;
+    private static final byte STATUS_EPHKEY_LEN = 8;
+    private static final byte STATUS_WORDS = 9;
     
     public static final byte AES_GCM_KEY_SIZE = 16; 
     public static final byte AES_GCM_IV_SIZE = 12;
@@ -175,6 +175,8 @@ public class CryptoManager {
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL] = 0;
         mStatusWords[STATUS_ENTRY_AUTHDATA_LENGTH] = 0;
+        mStatusWords[STATUS_DOCTYPE_LEN] = 0;
+        mStatusWords[STATUS_EPHKEY_LEN] = 0;
         
         for (short i = 0; i < STATUS_WORDS; i++) {
             mStatusWords[i] = 0;
@@ -521,7 +523,8 @@ public class CryptoManager {
         
         // Check that current namespace is already finished with personalization
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE)) {
-            assertStatusFlagSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES); // Verify that namespaces aren't already personalized
+            // Verify that we did not already already finish personalization
+            assertStatusFlagSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES);
 
             decodeNamespaceForSigning(receiveBuffer, inOffset, receivingLength);
             
@@ -823,6 +826,9 @@ public class CryptoManager {
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, true);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, false);
+        
+        // Make sure that temp buffer is not used as ephemeral key (needs to be loaded again)
+        mStatusWords[STATUS_EPHKEY_LEN] = 0;
     }
 
     /**
@@ -857,10 +863,16 @@ public class CryptoManager {
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE)) {
             assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES); // Verify that there are still missing namespaces
 
-            decodeNamespaceForSigning(receiveBuffer, inOffset, receivingLength);
+            short namespaceNameOffset = decodeNamespaceForSigning(receiveBuffer, inOffset, receivingLength);
+            short namespaceNameLen = (short) (mCBORDecoder.getCurrentOffset() - namespaceNameOffset);
             
-            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, true);
-            mDigest.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+            if (mAccessControlManager.isValidNamespace(receiveBuffer, namespaceNameOffset, namespaceNameLen)) {
+                ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, true);
+                mDigest.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+            } else {
+                mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL] = 0;
+                ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+            }
         } else {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
@@ -874,14 +886,15 @@ public class CryptoManager {
      * @param receiveBuffer Reference to the receiving buffer
      * @param inOffset Offset in the receiving buffer
      * @param receivingLength Length of the data in the receiving buffer
+     * @return Offset in the buffer where the namespace name begins
      */
-    private void decodeNamespaceForSigning(byte[] receiveBuffer, short inOffset, short receivingLength) {
+    private short decodeNamespaceForSigning(byte[] receiveBuffer, short inOffset, short receivingLength) {
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
 
         // Get the number of entries in this namespace
-        mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]= mCBORDecoder.readMajorType(CBORBase.TYPE_UNSIGNED_INTEGER);
-        
+        mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL] = mCBORDecoder.readMajorType(CBORBase.TYPE_UNSIGNED_INTEGER);
+
         short namespaceNameLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
         short namespaceNameOffset = mCBORDecoder.getCurrentOffsetAndIncrease(namespaceNameLength);
         
@@ -890,6 +903,8 @@ public class CryptoManager {
 
         // Reset counter for the number of entries in current namespace 
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
+        
+        return namespaceNameOffset;
     }
     
     /**
@@ -923,8 +938,8 @@ public class CryptoManager {
             mCBORDecoder.skipEntry(); // Skip namespace value
             
             mCBORDecoder.skipEntry(); // Skip "name" 
-            short nameOffset = mCBORDecoder.getCurrentOffset();
-            short nameLength = (short) (mCBORDecoder.skipEntry() - nameOffset);
+            short nameLength = mCBORDecoder.readLength();
+            short nameOffset = mCBORDecoder.getCurrentOffsetAndIncrease(nameLength);
 
             // Add the actual name to the signature
             mDigest.update(receiveBuffer, nameOffset, nameLength);
@@ -932,7 +947,8 @@ public class CryptoManager {
             mCBORDecoder.skipEntry(); // Skip "AccessControlProfileIds"
             short nrOfPids = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
 
-            if (mAccessControlManager.checkAccessPermission(receiveBuffer, mCBORDecoder.getCurrentOffset(), nrOfPids)) {
+            if (mAccessControlManager.checkAccessPermission(receiveBuffer, mCBORDecoder.getCurrentOffset(), nrOfPids)
+                    && mAccessControlManager.isNameInCurrentNamespaceConfig(receiveBuffer, nameOffset, nameLength)) {
                 // Remember the whole additional data field for the data entry decryption 
                 storeAuthenticationData(receiveBuffer, inOffset, receivingLength);
             } else {
@@ -1213,7 +1229,10 @@ public class CryptoManager {
         } catch (CryptoException e) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
-        
+     
+        // Finished retrieval, reset the state so that future requests fail
+        reset();
+        mAccessControlManager.reset();
     }
     
     /**
@@ -1251,7 +1270,7 @@ public class CryptoManager {
         
         // Get the current ephemeral key
         ECPublicKey pubKey = ((ECPublicKey)mTempECKeyPair.getPublic());
-        short keyLen = pubKey.getW(mTempBuffer, (short)0);
+        mStatusWords[STATUS_EPHKEY_LEN] = pubKey.getW(mTempBuffer, (short)0);
         
         try {
             // Set the reader public key and verify
@@ -1264,8 +1283,58 @@ public class CryptoManager {
             result = false;
         }
         // Reset the ephemeral key to the initial state
-        pubKey.setW(mTempBuffer, (short) 0, keyLen);
+        pubKey.setW(mTempBuffer, (short) 0, mStatusWords[STATUS_EPHKEY_LEN]);
         return result;
+    }
+
+    /**
+     * Compare the provided docType with the stored one. If they are equal, return
+     * true. False otherwise.
+     * 
+     * @param docType       Buffer location for the docType to compare
+     * @param docTypeOffset Offset in buffer
+     * @param docTypeLen    Length of the given docType
+     * @return Boolean indicating if the provided docType matches the stored one.
+     */
+    public boolean compareDocType(byte[] docType, short docTypeOffset, short docTypeLen) {
+        if (docTypeLen == mStatusWords[STATUS_DOCTYPE_LEN]
+                && Util.arrayCompare(docType, docTypeOffset, mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, docTypeLen) == 0) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    private static final byte[] TESTEPH_KEY = new byte[] { (byte) 0x04, (byte) 0x0E, (byte) 0xFE, (byte) 0x2F,
+            (byte) 0x68, (byte) 0xC2, (byte) 0xA6, (byte) 0xB2, (byte) 0x15, (byte) 0xA0, (byte) 0x13, (byte) 0xFF,
+            (byte) 0xB4, (byte) 0xDC, (byte) 0xAB, (byte) 0x62, (byte) 0x0F, (byte) 0xE0, (byte) 0xCE, (byte) 0xCE,
+            (byte) 0xAE, (byte) 0x90, (byte) 0xA6, (byte) 0x17, (byte) 0xA2, (byte) 0x23, (byte) 0xB5, (byte) 0x1A,
+            (byte) 0x71, (byte) 0x2B, (byte) 0xF2, (byte) 0xFE, (byte) 0xE2, (byte) 0x84, (byte) 0x75, (byte) 0xCF,
+            (byte) 0x67, (byte) 0xE1, (byte) 0xF9, (byte) 0x68, (byte) 0xF8, (byte) 0x0A, (byte) 0xA1, (byte) 0x6F,
+            (byte) 0xEF, (byte) 0xEE, (byte) 0x5F, (byte) 0xA5, (byte) 0xF3, (byte) 0xA1, (byte) 0xE4, (byte) 0x9C,
+            (byte) 0x7C, (byte) 0x1B, (byte) 0x86, (byte) 0xEB, (byte) 0xF2, (byte) 0x87, (byte) 0x97, (byte) 0xDC,
+            (byte) 0x9C, (byte) 0x7D, (byte) 0x62, (byte) 0xAA, (byte) 0xF6 };
+    /**
+     * Compare the provided ephemeral key with the stored one. If they are equal, return
+     * true. False otherwise.
+     * 
+     * @param docType       Buffer location for the ephemeral key to compare
+     * @param docTypeOffset Offset in buffer
+     * @param docTypeLen    Length of the given ephemeral key
+     * @return Boolean indicating if the provided ephemeral key matches the stored one.
+     */
+    public boolean compareEphemeralKey(byte[] ephKeyBuffer, short ephKeyOffset, short ephKeyLen) {
+        // Get the current ephemeral key
+        if (mStatusWords[STATUS_EPHKEY_LEN] == 0) {
+            ECPublicKey pubKey = ((ECPublicKey) mTempECKeyPair.getPublic());
+            mStatusWords[STATUS_EPHKEY_LEN] = pubKey.getW(mTempBuffer, (short) 0);
+        }
+
+        if (mStatusWords[STATUS_EPHKEY_LEN] == ephKeyLen && Util.arrayCompare(ephKeyBuffer, ephKeyOffset, TESTEPH_KEY,
+                (short) 0, mStatusWords[STATUS_EPHKEY_LEN]) == 0) {
+            return true;
+        }
+        return false;
     }
     
     private void assertCredentialLoaded() {
@@ -1297,6 +1366,4 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
     }
-
-
 }

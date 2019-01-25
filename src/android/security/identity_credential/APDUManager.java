@@ -49,7 +49,11 @@ public class APDUManager {
 
     private final byte[] mStatusFlags;
     private final short[] mStatusValues;
+    
+    // Buffer for sending and retrieving large data chunks 
     private final byte[] mLargeSendAndRecvBuffer;
+    
+    // Buffer only for sending data (smaller chunks)
     private byte[] mSendBuffer;
 
     public APDUManager(byte cryptoHeaderOverhead) {
