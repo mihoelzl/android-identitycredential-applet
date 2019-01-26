@@ -69,6 +69,19 @@ public class CryptoManager {
     public static final byte AES_GCM_TAG_SIZE = CryptoBaseX.AES_GCM_TAGLEN_128;
     public static final byte EC_KEY_SIZE = 32;
     public static final byte DIGEST_SIZE = 32;
+
+    /**
+     * Static ephemeral key for testing
+     */
+//    private static final byte[] TESTEPH_KEY = new byte[] { (byte) 0x04, (byte) 0x0E, (byte) 0xFE, (byte) 0x2F,
+//            (byte) 0x68, (byte) 0xC2, (byte) 0xA6, (byte) 0xB2, (byte) 0x15, (byte) 0xA0, (byte) 0x13, (byte) 0xFF,
+//            (byte) 0xB4, (byte) 0xDC, (byte) 0xAB, (byte) 0x62, (byte) 0x0F, (byte) 0xE0, (byte) 0xCE, (byte) 0xCE,
+//            (byte) 0xAE, (byte) 0x90, (byte) 0xA6, (byte) 0x17, (byte) 0xA2, (byte) 0x23, (byte) 0xB5, (byte) 0x1A,
+//            (byte) 0x71, (byte) 0x2B, (byte) 0xF2, (byte) 0xFE, (byte) 0xE2, (byte) 0x84, (byte) 0x75, (byte) 0xCF,
+//            (byte) 0x67, (byte) 0xE1, (byte) 0xF9, (byte) 0x68, (byte) 0xF8, (byte) 0x0A, (byte) 0xA1, (byte) 0x6F,
+//            (byte) 0xEF, (byte) 0xEE, (byte) 0x5F, (byte) 0xA5, (byte) 0xF3, (byte) 0xA1, (byte) 0xE4, (byte) 0x9C,
+//            (byte) 0x7C, (byte) 0x1B, (byte) 0x86, (byte) 0xEB, (byte) 0xF2, (byte) 0x87, (byte) 0x97, (byte) 0xDC,
+//            (byte) 0x9C, (byte) 0x7D, (byte) 0x62, (byte) 0xAA, (byte) 0xF6 };
     
     // Hardware bound key, initialized during Applet installation
     private final AESKey mHBK;
@@ -271,7 +284,7 @@ public class CryptoManager {
                 
                 // Keep the ephemeral key in the key object
                 short length = ((ECPublicKey) mTempECKeyPair.getPublic()).getW(mTempBuffer, (short) 0);
-    
+                
                 // Start the CBOR encoding of the output 
                 mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
                 mCBOREncoder.startArray((short) 3);
@@ -1112,11 +1125,11 @@ public class CryptoManager {
     /**
      * Process the GENERATE SIGNING KEY PAIR command. Throws an exception if the
      * credential is not initialized. Returns the encrypted signing key and the
-     * x.509 certificate of the public signing key
+     * X.509 certificate of the public signing key.
      */
     private void processGenerateSigningKeyPair() {
         assertCredentialLoaded();
-        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES);
+        assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_STARTED);
 
         byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
         
@@ -1124,37 +1137,77 @@ public class CryptoManager {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
         
-        mAPDUManager.setOutgoing();
-
+        mAPDUManager.setOutgoing(true);
+        byte[] outBuffer = mAPDUManager.getSendBuffer();
+        
         // Create the Signing key
         mTempECKeyPair.genKeyPair();
         
         short keyLen = ((ECPrivateKey)mTempECKeyPair.getPrivate()).getS(mTempBuffer, (short)0);
         
         // Start the CBOR encoding of the output 
-        mCBOREncoder.init(mAPDUManager.getSendBuffer(), (short) 0, mAPDUManager.getOutbufferLength());
+        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
         mCBOREncoder.startArray((short) 2);
         
         short encodedLocation = mCBOREncoder.startByteString((short) (AES_GCM_IV_SIZE + AES_GCM_TAG_SIZE + keyLen));
 
-        // TODO(hoelzl) use doctype as authentication data?
-        encryptCredentialData(mTempBuffer, (short) 0, keyLen, mTempBuffer, (short) 0, (short) 0, mAPDUManager.getSendBuffer(), encodedLocation);
+        encryptCredentialData(mTempBuffer, (short) 0, keyLen, mTempBuffer, TEMP_BUFFER_DOCTYPE_POS,
+                mStatusWords[STATUS_DOCTYPE_LEN], mAPDUManager.getSendBuffer(), encodedLocation);
+
+        // We don't know the actual size yet. To avoid copying it to temporary buffer,
+        // we just make sure that sufficient space for the length field is allocated (2 bytes)
+        encodedLocation = mCBOREncoder.startByteString((short) 0x200); 
+
+        short certLen = createSigningKeyCertificate((ECPublicKey) mTempECKeyPair.getPublic(), outBuffer,
+                encodedLocation);
+
+        // Set the actual size
+        Util.setShort(outBuffer, (short) (encodedLocation - 2), certLen);
         
-        short certLen = createSigningKeyCertificate((ECPublicKey) mTempECKeyPair.getPublic(), mTempBuffer,
-                (short) 0);
-        mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, certLen); 
-        
-        mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
+        mAPDUManager.setOutgoingLength((short) (encodedLocation + certLen));
     }
     
     
     private short createSigningKeyCertificate(ECPublicKey signingKey, byte[] outCertificateBuffer, short outOffset) {
-        //TODO: implement x509 certificate creation of public signing key
-        return 0;
+        short certLen = (short) ICConstants.X509_CERT_BASE.length;
+        // Copy the base
+        Util.arrayCopyNonAtomic(ICConstants.X509_CERT_BASE, (short) 0, outCertificateBuffer, outOffset, certLen);
+        
+        // Update the serial number (random 8 bytes)
+        mRandomData.generateData(outCertificateBuffer, (short) (outOffset + ICConstants.X509_CERT_POS_SERIAL_NUM),
+                ICConstants.X509_CERT_SERIAL_NUMBER_LEN);
+        
+        // TODO: add validity period: use time source from user authentication token?
+        
+        // Change public key
+        short len = signingKey.getW(outCertificateBuffer, (short) (outOffset + ICConstants.X509_CERT_POS_PUB_KEY));
+
+        // Do not sign the starting tag and the signing key information at the end of the cert
+        short signingBegin = ICConstants.X509_CERT_POS_TOTAL_LEN + 1;
+        short signingLen = (short) (ICConstants.X509_CERT_POS_PUB_KEY + len - signingBegin);
+        
+        // Sign and append signature to output
+        mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
+        short signatureOffset = (short) (outOffset + certLen);
+        
+        len = mECSignature.sign(outCertificateBuffer, signingBegin, signingLen, outCertificateBuffer,
+                (short) (signatureOffset + 3)); // +3 to keep space for the tag information
+        
+        // Encode signature tag
+        outCertificateBuffer[signatureOffset] = ICConstants.X509_CERT_TAG_BITSTRING;
+        // We assume that the signature len fits in one byte (127) for now 
+        outCertificateBuffer[(short) (signatureOffset + 1)] = (byte) (len + 1);
+        outCertificateBuffer[(short) (signatureOffset + 2)] = 0; // Encapsulated signature
+        
+        // Final length (previously stored length + signature)
+        len += 3 /* Tag info*/;
+        outCertificateBuffer[(short) (outOffset + ICConstants.X509_CERT_POS_TOTAL_LEN)] += len; 
+        return (short) (certLen + len);
     }
 
     private void processSignDataRequest() {
         assertCredentialLoaded();
+        assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_STARTED);
         assertStatusFlagNotSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES);
 
         short receivingLength = mAPDUManager.receiveAll();
@@ -1211,9 +1264,8 @@ public class CryptoManager {
         
         try {
             // Decrypt signing key
-            // TODO(hoelzl) use doctype as authentication data?
-            signingKeyBlobLen = decryptCredentialData(receiveBuffer, signingKeyBlobOffset, signingKeyBlobLen, mTempBuffer, (short) 0,
-                    (short) 0, mTempBuffer, hashLen);
+            signingKeyBlobLen = decryptCredentialData(receiveBuffer, signingKeyBlobOffset, signingKeyBlobLen,
+                    mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, mStatusWords[STATUS_DOCTYPE_LEN], mTempBuffer, hashLen);
     
             // Set the signing key
             ECPrivateKey signingKey = ((ECPrivateKey) mTempECKeyPair.getPrivate());
@@ -1228,11 +1280,13 @@ public class CryptoManager {
             mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
         } catch (CryptoException e) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
+        } finally {
+            ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, false);
+            
+            // Finished retrieval, reset the state so that future requests fail
+            reset();
+            mAccessControlManager.reset();
         }
-     
-        // Finished retrieval, reset the state so that future requests fail
-        reset();
-        mAccessControlManager.reset();
     }
     
     /**
@@ -1306,18 +1360,6 @@ public class CryptoManager {
     }
 
     /**
-     * Static ephemeral key for testing
-     */
-    private static final byte[] TESTEPH_KEY = new byte[] { (byte) 0x04, (byte) 0x0E, (byte) 0xFE, (byte) 0x2F,
-            (byte) 0x68, (byte) 0xC2, (byte) 0xA6, (byte) 0xB2, (byte) 0x15, (byte) 0xA0, (byte) 0x13, (byte) 0xFF,
-            (byte) 0xB4, (byte) 0xDC, (byte) 0xAB, (byte) 0x62, (byte) 0x0F, (byte) 0xE0, (byte) 0xCE, (byte) 0xCE,
-            (byte) 0xAE, (byte) 0x90, (byte) 0xA6, (byte) 0x17, (byte) 0xA2, (byte) 0x23, (byte) 0xB5, (byte) 0x1A,
-            (byte) 0x71, (byte) 0x2B, (byte) 0xF2, (byte) 0xFE, (byte) 0xE2, (byte) 0x84, (byte) 0x75, (byte) 0xCF,
-            (byte) 0x67, (byte) 0xE1, (byte) 0xF9, (byte) 0x68, (byte) 0xF8, (byte) 0x0A, (byte) 0xA1, (byte) 0x6F,
-            (byte) 0xEF, (byte) 0xEE, (byte) 0x5F, (byte) 0xA5, (byte) 0xF3, (byte) 0xA1, (byte) 0xE4, (byte) 0x9C,
-            (byte) 0x7C, (byte) 0x1B, (byte) 0x86, (byte) 0xEB, (byte) 0xF2, (byte) 0x87, (byte) 0x97, (byte) 0xDC,
-            (byte) 0x9C, (byte) 0x7D, (byte) 0x62, (byte) 0xAA, (byte) 0xF6 };
-    /**
      * Compare the provided ephemeral key with the stored one. If they are equal, return
      * true. False otherwise.
      * 
@@ -1333,10 +1375,11 @@ public class CryptoManager {
             mStatusWords[STATUS_EPHKEY_LEN] = pubKey.getW(mTempBuffer, (short) 0);
         }
 
-        if (mStatusWords[STATUS_EPHKEY_LEN] == ephKeyLen && Util.arrayCompare(ephKeyBuffer, ephKeyOffset, TESTEPH_KEY,
+        if (mStatusWords[STATUS_EPHKEY_LEN] == ephKeyLen && Util.arrayCompare(ephKeyBuffer, ephKeyOffset, mTempBuffer,
                 (short) 0, mStatusWords[STATUS_EPHKEY_LEN]) == 0) {
             return true;
         }
+
         return false;
     }
     

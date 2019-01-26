@@ -44,7 +44,7 @@ public class CBOREncoder extends CBORBase{
         encodeValue((byte) (TYPE_MAP << 5), mapSize);
         return getCurrentOffset();
     }
-
+    
     /**
      * Encodes the start of a byte string with the given length at the current
      * buffer location. The actual byte string is not copied into the buffer and the
@@ -60,6 +60,15 @@ public class CBOREncoder extends CBORBase{
     }
 
 
+    /**
+     * Encodes the start of a text string with the given length at the current
+     * location. The actual text string is not copied into the buffer and the
+     * internal offset will already be increased by the given length (offset will be
+     * set to the location after the byte string)
+     * 
+     * @return The offset in the buffer where the text string is supposed to be
+     *         copied into.
+     */
     public short startTextString(short length) {
         encodeValue((byte) (TYPE_TEXT_STRING << 5), length);
         return getCurrentOffsetAndIncrease(length);

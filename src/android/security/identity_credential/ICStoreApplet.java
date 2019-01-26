@@ -169,8 +169,7 @@ public class ICStoreApplet extends Applet implements ExtendedLength {
             break;
         case CBORDecoder.TYPE_FLOAT:
             outLength = 2;
-            break;
-            
+            break;            
         }
         
         mAPDUManager.setOutgoingLength(outLength);

@@ -41,7 +41,7 @@ public class AccessControlManager {
     private static final short TEMPBUFFER_SIZE = BUFFERPOS_USERID + MAX_USER_ID_LENGTH;
     
     private static final short NAMESPACE_CONF_SIZE_RAM = 50;
-    private static final short NAMESPACE_CONF_SIZE_FLASH= 400;
+    private static final short NAMESPACE_CONF_SIZE_FLASH= 250;
     
     // Status information 
     private final short[] mStatusWords;
@@ -77,6 +77,7 @@ public class AccessControlManager {
         mStatusWords[VALUE_CURRENT_STATUS] = 0;
         mStatusWords[VALUE_READER_KEY_LENGTH] = 0;
         Util.arrayFillNonAtomic(mProfileIds, (short) 0, PROFILEIDS_BITFIELD_SIZE, (byte) 0);
+        mDataRequestStorage.reset();
     }
 
     public void process(CryptoManager cryptoManager) {
@@ -514,6 +515,9 @@ public class AccessControlManager {
      *         request
      */
     public boolean isValidNamespace(byte[] namespace, short namespaceOffset, short namespaceLength) {
+        if (!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
+            return false;
+        }
         return mDataRequestStorage.loadNamespaceConfig(namespace, namespaceOffset, namespaceLength);
     }
 
@@ -527,6 +531,9 @@ public class AccessControlManager {
      * @return Boolean indicating if the name was found in the data request
      */
     public boolean isNameInCurrentNamespaceConfig(byte[] name, short nameOffset, short nameLength) {
+        if (!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
+            return false;
+        }
         return mDataRequestStorage.isNameInNamespace(name, nameOffset, nameLength);
     }
 }
