@@ -176,7 +176,11 @@ public class CryptoManager {
         mCBORDecoder = decoder;
         mCBOREncoder = encoder;
     }
-    
+
+    /**
+     * Reset the internal state. Resets the credential private key, the storage key
+     * as well as all status flags.
+     */
     public void reset() {
         ICUtil.setBit(mStatusFlags, FLAG_TEST_CREDENTIAL, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_KEYS_INITIALIZED, false);
@@ -184,6 +188,9 @@ public class CryptoManager {
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_PROFILES, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, false);
         ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, false);
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_ENTRIES, false);
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_CHUNKED, false);
+        ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE, false);
         
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL] = 0;
@@ -191,15 +198,18 @@ public class CryptoManager {
         mStatusWords[STATUS_DOCTYPE_LEN] = 0;
         mStatusWords[STATUS_EPHKEY_LEN] = 0;
         
-        for (short i = 0; i < STATUS_WORDS; i++) {
-            mStatusWords[i] = 0;
-        }
-        
+        ICUtil.shortArrayFillNonAtomic(mStatusWords, (short) 0, STATUS_WORDS, (short) 0);
+
         mCredentialStorageKey.clearKey();
         mCredentialECKeyPair.getPrivate().clearKey();
         Secp256r1.configureECKeyParameters((ECKey) mCredentialECKeyPair.getPrivate());
     }
     
+    /**
+     * Process an APDU related to the cryptomanager. Throws
+     * {@value ISO7816#SW_INS_NOT_SUPPORTED} if the instruction byte was not
+     * processed.
+     */
     public void process() {
         byte[] buf = mAPDUManager.getReceiveBuffer();
         switch(buf[ISO7816.OFFSET_INS]) {
@@ -244,12 +254,16 @@ public class CryptoManager {
         }
     }
 
+    /**
+     * Returns the used AES key size for the storage as well as hardware-bound key
+     * in bit.
+     */
     public short getAESKeySize() {
         return (short) (AES_GCM_KEY_SIZE * 8);
     }
     
     /**
-     * Process the CREATE EPHEMERAL KEY command
+     * Process the CREATE EPHEMERAL KEY command.
      */
     private void processCreateEphemeralKey() throws ISOException {
         mAPDUManager.receiveAll();
@@ -499,14 +513,46 @@ public class CryptoManager {
         return false;
     }
     
+    /**
+     * Process the GET ATTESTATION CERTIFICATE command. Throws an exception when the
+     * credential is not loaded yet or the applet is not in personalization state.
+     */
     private void processGetAttestationCertificate() {
         assertCredentialLoaded();
-        // TODO implement
+        assertInPersonalizationState();
+
+        short receivingLength = mAPDUManager.receiveAll();
+        byte[] receiveBuffer = mAPDUManager.getReceiveBuffer();
+        short inOffset = mAPDUManager.getOffsetIncomingData();
+
+        mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
+        // TODO decode the attestation challenge and the attestation id
+
+        mAPDUManager.setOutgoing(true);
+        byte[] outBuffer = mAPDUManager.getSendBuffer();
+        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
+
+        // TODO let the keymaster sign the attestation certificate. For now, we make it
+        // self signed
+
+        // We don't know the actual size yet. To avoid copying it to temporary buffer,
+        // we just make sure that sufficient space for the length field is allocated (2
+        // bytes)
+        short encodedLocation = mCBOREncoder.startByteString((short) 0x200);
+
+        short certLen = createSigningKeyCertificate((ECPrivateKey) mCredentialECKeyPair.getPrivate(),
+                (ECPublicKey) mCredentialECKeyPair.getPublic(), outBuffer, encodedLocation);
+
+        // Set the actual size
+        Util.setShort(outBuffer, (short) (encodedLocation - 2), certLen);
+
+        mAPDUManager.setOutgoingLength((short) (encodedLocation + certLen));
     }
 
     /**
-     * Process the PERSONALIZE NAMESPACE command. Throws an exception when namespace
-     * was already personalized
+     * Process the PERSONALIZE NAMESPACE command. Throws an exception when the
+     * applet is not in personalization state, profiles are not personalized yet, or
+     * previous namespace is not finished with personalization.
      */
     private void processPersonalizeNamespace() {
         assertInPersonalizationState();
@@ -1158,8 +1204,8 @@ public class CryptoManager {
         // we just make sure that sufficient space for the length field is allocated (2 bytes)
         encodedLocation = mCBOREncoder.startByteString((short) 0x200); 
 
-        short certLen = createSigningKeyCertificate((ECPublicKey) mTempECKeyPair.getPublic(), outBuffer,
-                encodedLocation);
+        short certLen = createSigningKeyCertificate((ECPrivateKey) mCredentialECKeyPair.getPrivate(),
+                (ECPublicKey) mTempECKeyPair.getPublic(), outBuffer, encodedLocation);
 
         // Set the actual size
         Util.setShort(outBuffer, (short) (encodedLocation - 2), certLen);
@@ -1168,7 +1214,24 @@ public class CryptoManager {
     }
     
     
-    private short createSigningKeyCertificate(ECPublicKey signingKey, byte[] outCertificateBuffer, short outOffset) {
+    /**
+     * Generate a x.509 certificate from the provided public key. Signs it with the
+     * signing key. Note that it is only possible to generate a certificate with
+     * fixed public key parameters and sizes. The base certificate format is defined
+     * in {@link ICConstants#X509CERT_BASE}
+     * 
+     * @param signingKey           Key that should be used for signing the
+     *                             certificate
+     * @param publicKey            Public key that should be inserted into the
+     *                             signature.
+     * @param outCertificateBuffer Output buffer where the certificate should be
+     *                             written.
+     * @param outOffset            Offset into output buffer where the certificate
+     *                             should be written.
+     * @return Number of bytes written to output buffer.
+     */
+    private short createSigningKeyCertificate(ECPrivateKey signingKey, ECPublicKey publicKey,
+            byte[] outCertificateBuffer, short outOffset) {
         short certLen = (short) ICConstants.X509_CERT_BASE.length;
         // Copy the base
         Util.arrayCopyNonAtomic(ICConstants.X509_CERT_BASE, (short) 0, outCertificateBuffer, outOffset, certLen);
@@ -1180,14 +1243,14 @@ public class CryptoManager {
         // TODO: add validity period: use time source from user authentication token?
         
         // Change public key
-        short len = signingKey.getW(outCertificateBuffer, (short) (outOffset + ICConstants.X509_CERT_POS_PUB_KEY));
+        short len = publicKey.getW(outCertificateBuffer, (short) (outOffset + ICConstants.X509_CERT_POS_PUB_KEY));
 
         // Do not sign the starting tag and the signing key information at the end of the cert
         short signingBegin = ICConstants.X509_CERT_POS_TOTAL_LEN + 1;
         short signingLen = (short) (ICConstants.X509_CERT_POS_PUB_KEY + len - signingBegin);
         
         // Sign and append signature to output
-        mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
+        mECSignature.init(signingKey, Signature.MODE_SIGN);
         short signatureOffset = (short) (outOffset + certLen);
         
         len = mECSignature.sign(outCertificateBuffer, signingBegin, signingLen, outCertificateBuffer,
@@ -1205,6 +1268,12 @@ public class CryptoManager {
         return (short) (certLen + len);
     }
 
+    /**
+     * Process the signature creation request for data retrieval. Also computes the
+     * final auditSignatureHash and returns both signatures (data request and audit
+     * log signature) as well as the hash of the data entry response. Expects the
+     * signing key blob as well as the previous audit log hash in the command apdu.
+     */
     private void processSignDataRequest() {
         assertCredentialLoaded();
         assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_STARTED);
@@ -1314,7 +1383,8 @@ public class CryptoManager {
     }
 
     /**
-     * Verify the signature of the reader over the provided request data. Also verifies that the ephemeral key is inside the requestData.
+     * Verify the signature of the reader over the provided request data. Also
+     * verifies that the ephemeral key is inside the requestData.
      */
     public boolean verifyReaderSignature(byte[] readerAuthData, short readerAuthDataOffset, short readerAuthDataLen,
             byte[] readerPubKey, short readerAuthPubKeyOffset, short readerAuthPubKeyLen, byte[] readerSignature,
