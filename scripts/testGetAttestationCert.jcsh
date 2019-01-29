@@ -1,0 +1,10 @@
+helperFunctions
+selectApplet
+loadTestData
+
+/echo ############   GET ATTESTION CERTIFICATE    ############
+
+/send 80100000#(${docType}) 
+/set-var result $(sendDataInChain 11 00 01 00 9000)
+
+/echo ${result}

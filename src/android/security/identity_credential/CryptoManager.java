@@ -983,7 +983,6 @@ public class CryptoManager {
         byte[] outBuffer = mAPDUManager.getSendBuffer();
         
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
-        mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
 
         byte entryStatus = (byte) (receiveBuffer[ISO7816.OFFSET_P1] & 0x7); // Get status of entry personalization
         
@@ -993,15 +992,17 @@ public class CryptoManager {
             // Get name from authentication data and add signature 
             mCBORDecoder.readMajorType(CBORBase.TYPE_MAP);
             
-            mCBORDecoder.skipEntry(); // Skip "namespace"
+            mCBORDecoder.skipEntry(); // Skip map key "namespace"
             mCBORDecoder.skipEntry(); // Skip namespace value
             
-            mCBORDecoder.skipEntry(); // Skip "name" 
-            short nameLength = mCBORDecoder.readLength();
+            mCBORDecoder.skipEntry(); // Skip map key "name"
+            // Read the value and store the offsets
+            short nameKeyOffset = mCBORDecoder.getCurrentOffset();
+            short nameLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
             short nameOffset = mCBORDecoder.getCurrentOffsetAndIncrease(nameLength);
 
             // Add the actual name to the signature
-            mDigest.update(receiveBuffer, nameOffset, nameLength);
+            mDigest.update(receiveBuffer, nameKeyOffset, (short) (mCBORDecoder.getCurrentOffset() - nameKeyOffset));
 
             mCBORDecoder.skipEntry(); // Skip "AccessControlProfileIds"
             short nrOfPids = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
