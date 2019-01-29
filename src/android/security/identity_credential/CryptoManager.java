@@ -372,25 +372,33 @@ public class CryptoManager {
         
         // Return credentialBlob and start signature creation
         try {
+            // Save docType
+            Util.arrayCopyNonAtomic(receiveBuffer, inOffset, mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, receivingLength);
+            mStatusWords[STATUS_DOCTYPE_LEN] = receivingLength;
+            
             // encrypt storage key and credential key for returning
-            outOffset += wrapCredentialBlob(encryptionKey, receiveBuffer, inOffset, receivingLength, outBuffer, outOffset);
+            outOffset += wrapCredentialBlob(encryptionKey, mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, mStatusWords[STATUS_DOCTYPE_LEN], outBuffer, outOffset);
             
-            // Initialize the signature creation object
-            mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
-            
-            // Add doc type to the signature {"docType" : tstr, ...
-            mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
-            mCBOREncoder.startMap((short) 4);
-            mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_DOCTYPE, (short) 0,
-                    (short) ICConstants.CBOR_MAPKEY_DOCTYPE.length);
-            mCBOREncoder.encodeTextString(receiveBuffer, inOffset, receivingLength);
-            
-            mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+            startPersonalizationSignature(mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, mStatusWords[STATUS_DOCTYPE_LEN]);
             
             mAPDUManager.setOutgoingLength(outOffset);
         } catch (CryptoException e) {
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         }
+    }
+
+    private void startPersonalizationSignature(byte[] docType, short typeOffset, short typeLen) {
+        // Initialize the signature creation object
+        mECSignature.init(mCredentialECKeyPair.getPrivate(), Signature.MODE_SIGN);
+        
+        // Add doc type to the signature {"docType" : tstr, ...
+        mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
+        mCBOREncoder.startMap((short) 4);
+        mCBOREncoder.encodeTextString(ICConstants.CBOR_MAPKEY_DOCTYPE, (short) 0,
+                (short) ICConstants.CBOR_MAPKEY_DOCTYPE.length);
+        mCBOREncoder.encodeTextString(docType, typeOffset, typeLen);
+        
+        mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
     }
 
     /**
@@ -547,6 +555,9 @@ public class CryptoManager {
         Util.setShort(outBuffer, (short) (encodedLocation - 2), certLen);
 
         mAPDUManager.setOutgoingLength((short) (encodedLocation + certLen));
+
+        // We need to start the personalization signature again (certificate creation overwrites signature object)
+        startPersonalizationSignature(mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, mStatusWords[STATUS_DOCTYPE_LEN]);
     }
 
     /**
@@ -1229,12 +1240,9 @@ public class CryptoManager {
      * 
      * @param signingKey           Key that should be used for signing the
      *                             certificate
-     * @param publicKey            Public key that should be inserted into the
-     *                             signature.
-     * @param outCertificateBuffer Output buffer where the certificate should be
-     *                             written.
-     * @param outOffset            Offset into output buffer where the certificate
-     *                             should be written.
+     * @param publicKey            Public key that should be signed.
+     * @param outCertificateBuffer Output buffer for the certificate.
+     * @param outOffset            Offset into output buffer.
      * @return Number of bytes written to output buffer.
      */
     private short createSigningKeyCertificate(ECPrivateKey signingKey, ECPublicKey publicKey,
