@@ -1329,35 +1329,46 @@ public class CryptoManager {
         // Finish computing the new auditSignatureHash
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
         
-        // responseHash : bstr
-        short hashLen = mDigest.doFinal(mTempBuffer, (short) 0, (short) 0, mTempBuffer,
-                mCBOREncoder.startByteString(DIGEST_SIZE));
+        // Compute the responseHash 
+        short hashBegin = mCBOREncoder.startByteString(DIGEST_SIZE);
+        mDigest.doFinal(mTempBuffer, (short) 0, (short) 0, mTempBuffer, hashBegin);
 
-        mECSignature.update(mTempBuffer, (short) 0, hashLen);
+        short hashEnd = mCBOREncoder.getCurrentOffset();
         
-        // previousAuditSignatureHash : bstr
-        // Compute new auditSignatureHash and append to output
+        // Add the response hash to the auditLog
+        mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+        
+        // Add previousAuditSignatureHash to the auditLog and sign the auditLogentry
         short signatureLen = mECSignature.sign(receiveBuffer, previousHashOffset, previousHashLen, mTempBuffer,
-                hashLen);
- 
+                hashEnd);
+
+        // Create output. Format of the output
+        // finalSignatures = [
+        //        bstr,    ; auditLogSignature
+        //        bstr,    ; responseHash
+        //        bstr     ; response signature
+        //     ]
+
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
         mCBOREncoder.startArray((short) 3);
-
-        mCBOREncoder.encodeByteString(mTempBuffer, hashLen, signatureLen);
-        mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, hashLen);
+        
+        // Add auditLogSignature
+        mCBOREncoder.encodeByteString(mTempBuffer, hashEnd, signatureLen);
+        // Add responseHash
+        mCBOREncoder.encodeByteString(mTempBuffer, hashBegin, (short) (hashEnd - hashBegin));
         
         try {
             // Decrypt signing key
             signingKeyBlobLen = decryptCredentialData(receiveBuffer, signingKeyBlobOffset, signingKeyBlobLen,
-                    mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, mStatusWords[STATUS_DOCTYPE_LEN], mTempBuffer, hashLen);
+                    mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, mStatusWords[STATUS_DOCTYPE_LEN], mTempBuffer, hashEnd);
     
             // Set the signing key
             ECPrivateKey signingKey = ((ECPrivateKey) mTempECKeyPair.getPrivate());
-            signingKey.setS(mTempBuffer, hashLen, signingKeyBlobLen);
+            signingKey.setS(mTempBuffer, hashEnd, signingKeyBlobLen);
     
             // Sign the actual request (precomputed hash in digest object -> see above)
             mECSignature.init(signingKey, Signature.MODE_SIGN);
-            signatureLen = mECSignature.signPreComputedHash(mTempBuffer, (short) 0, hashLen, mTempBuffer, (short) 0);
+            signatureLen = mECSignature.signPreComputedHash(mTempBuffer, hashBegin, (short) (hashEnd - hashBegin), mTempBuffer, (short) 0);
     
             mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, signatureLen);
             
