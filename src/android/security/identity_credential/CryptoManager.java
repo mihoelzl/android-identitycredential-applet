@@ -585,7 +585,7 @@ public class CryptoManager {
             // Verify that we did not already already finish personalization
             assertStatusFlagSet(FLAG_CREDENIAL_PERSONALIZING_ENTRIES);
 
-            decodeNamespaceForSigning(receiveBuffer, inOffset, receivingLength);
+            decodeNamespaceForSigning(receiveBuffer, inOffset, receivingLength, false);
             
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_PERSONALIZING_NAMESPACE, true);
             mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
@@ -922,7 +922,7 @@ public class CryptoManager {
         if(!ICUtil.getBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_NAMESPACE)) {
             assertStatusFlagSet(FLAG_CREDENIAL_RETRIEVAL_ENTRIES); // Verify that there are still missing namespaces
 
-            short namespaceNameOffset = decodeNamespaceForSigning(receiveBuffer, inOffset, receivingLength);
+            short namespaceNameOffset = decodeNamespaceForSigning(receiveBuffer, inOffset, receivingLength, true);
             short namespaceNameLen = (short) (mCBORDecoder.getCurrentOffset() - namespaceNameOffset);
             
             if (mAccessControlManager.isValidNamespace(receiveBuffer, namespaceNameOffset, namespaceNameLen)) {
@@ -942,12 +942,14 @@ public class CryptoManager {
      * buffer and creates the beginning of the CBOR structure for the signature into
      * the CBOR encoder.
      * 
-     * @param receiveBuffer Reference to the receiving buffer
-     * @param inOffset Offset in the receiving buffer
+     * @param receiveBuffer   Reference to the receiving buffer
+     * @param inOffset        Offset in the receiving buffer
      * @param receivingLength Length of the data in the receiving buffer
+     * @param asMap           Specifies if in the signature, the beginning of the
+     *                        new namespace should be encoded as map or array
      * @return Offset in the buffer where the namespace name begins
      */
-    private short decodeNamespaceForSigning(byte[] receiveBuffer, short inOffset, short receivingLength) {
+    private short decodeNamespaceForSigning(byte[] receiveBuffer, short inOffset, short receivingLength, boolean asMap) {
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
 
@@ -958,7 +960,11 @@ public class CryptoManager {
         short namespaceNameOffset = mCBORDecoder.getCurrentOffsetAndIncrease(namespaceNameLength);
         
         mCBOREncoder.encodeTextString(receiveBuffer, namespaceNameOffset, namespaceNameLength);
-        mCBOREncoder.startArray(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]);
+        if (asMap) {
+            mCBOREncoder.startMap(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]);
+        } else {
+            mCBOREncoder.startArray(mStatusWords[STATUS_ENTRIES_IN_NAMESPACE_TOTAL]);
+        }
 
         // Reset counter for the number of entries in current namespace 
         mStatusWords[STATUS_ENTRIES_IN_NAMESPACE] = 0;
@@ -1001,14 +1007,14 @@ public class CryptoManager {
             short nameLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
             short nameOffset = mCBORDecoder.getCurrentOffsetAndIncrease(nameLength);
 
-            // Add the actual name to the signature
-            mDigest.update(receiveBuffer, nameKeyOffset, (short) (mCBORDecoder.getCurrentOffset() - nameKeyOffset));
-
             mCBORDecoder.skipEntry(); // Skip "AccessControlProfileIds"
             short nrOfPids = mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
 
             if (mAccessControlManager.checkAccessPermission(receiveBuffer, mCBORDecoder.getCurrentOffset(), nrOfPids)
                     && mAccessControlManager.isNameInCurrentNamespaceConfig(receiveBuffer, nameOffset, nameLength)) {
+                // Add the actual name to the signature
+                mDigest.update(receiveBuffer, nameKeyOffset, (short) (nameOffset + nameLength - nameKeyOffset));
+
                 // Remember the whole additional data field for the data entry decryption 
                 storeAuthenticationData(receiveBuffer, inOffset, receivingLength);
             } else {
@@ -1047,7 +1053,7 @@ public class CryptoManager {
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_CHUNKED, true); 
             
             // Add the value to the signature
-            mDigest.update(receiveBuffer, dataOffset, len);
+            mDigest.update(outBuffer, dataOffset, len);
             
             mAPDUManager.setOutgoingLength(len);
         } else {
