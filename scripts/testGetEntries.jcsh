@@ -67,11 +67,11 @@ sendDataInChain 31 00 01 ${readerAuth} 9000
 
 /send 803A0002#(${namespace2})00 *9000
 /send 803B0000#(${entry5AddData})00 *9000
-sendDataInChain 3B 04 00 ${encryptedChunk1} 9000
-sendDataInChain 3B 06 00 ${encryptedChunk2} 9000
-sendDataInChain 3B 06 00 ${encryptedChunk3} 9000
-sendDataInChain 3B 06 00 ${encryptedChunk4} 9000
-sendDataInChain 3B 07 00 ${encryptedChunk5} 9000
+sendDataInChain 3B 01 00 ${encryptedChunk1} 9000
+#sendDataInChain 3B 06 00 ${encryptedChunk2} 9000
+#sendDataInChain 3B 06 00 ${encryptedChunk3} 9000
+#sendDataInChain 3B 06 00 ${encryptedChunk4} 9000
+#sendDataInChain 3B 07 00 ${encryptedChunk5} 9000
 
 sendDataInChain 3C 00 00 825820000000000000000000000000000000000000000000000000000000000000000058#(${signingKeyBlob}) 9000
 

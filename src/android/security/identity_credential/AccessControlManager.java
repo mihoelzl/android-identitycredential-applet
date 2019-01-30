@@ -231,8 +231,8 @@ public class AccessControlManager {
             // Get the first key
             keyLen = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
             // Does it start with "DocType" : docType
-            if (keyLen == (short) ICConstants.CBOR_MAPKEY_DOCTYPE_UC.length && Util.arrayCompare(dataRequestBuffer,
-                    mCBORDecoder.getCurrentOffset(), ICConstants.CBOR_MAPKEY_DOCTYPE_UC, (short) 0, keyLen) == 0) {
+            if (keyLen == (short) ICConstants.CBOR_MAPKEY_DOCTYPE.length && Util.arrayCompare(dataRequestBuffer,
+                    mCBORDecoder.getCurrentOffset(), ICConstants.CBOR_MAPKEY_DOCTYPE, (short) 0, keyLen) == 0) {
                 mCBORDecoder.increaseOffset(keyLen);
 
                 // Check if this is our docType
@@ -441,7 +441,7 @@ public class AccessControlManager {
             if (mapSize >= 2) {
                 short keyLength = mCBORDecoder.readMajorType(CBORBase.TYPE_TEXT_STRING);
                 
-                if (keyLength == (short) ICConstants.CBOR_MAPKEY_READERAUTHPUBKEY.length) {
+                if (keyLength == (short) ICConstants.CBOR_MAPKEY_READERCERTIFICATE.length) {
                     mCBORDecoder.increaseOffset(keyLength);
                     
                     // reader authentication, check if public key matches the authenticated pub key
