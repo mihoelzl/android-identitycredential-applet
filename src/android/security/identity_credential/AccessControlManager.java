@@ -315,6 +315,9 @@ public class AccessControlManager {
             }
         }
         if (requestDataOffset == -1 || transcriptOffset == -1) {
+            // Possible attempt, resetting state
+            reset();
+            
             ISOException.throwIt(ISO7816.SW_DATA_INVALID); // Missing data
         }
         
@@ -358,6 +361,8 @@ public class AccessControlManager {
             if (readerAuthPubKeyLen > MAX_READERKEY_SIZE || !cryptoManager.verifyReaderSignature(receiveBuffer,
                     readerAuthDataOffset, readerAuthDataLen, receiveBuffer, readerAuthPubKeyOffset, readerAuthPubKeyLen,
                     receiveBuffer, readerSignOffset, readerSignLen)) {
+                // Possible attempt, resetting state
+                reset();
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             if (!getStatusFlag(STATUS_TRANSCRIPT_LOADED)) {
@@ -385,6 +390,8 @@ public class AccessControlManager {
 
             if (!authenticateUser(receiveBuffer, challengeOffset, challengeLen, receiveBuffer, timestampOffset,
                     timestampLen, receiveBuffer, tokenOffset, len)) {
+                // Possible attempt, resetting state
+                reset();
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
             setStatusFlag(STATUS_USER_AUTHENTICATED);

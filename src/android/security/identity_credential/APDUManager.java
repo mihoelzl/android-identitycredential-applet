@@ -24,12 +24,15 @@ import javacard.framework.Util;
 
 public class APDUManager {
 
+    private static final boolean FLAG_COMMON_SENDRECV_BUFFER = false;
+    
     // Buffer size for processing outgoing traffic
-    private static final short BUFFER_SIZE = 261;
+    private static final short BUFFER_SIZE = FLAG_COMMON_SENDRECV_BUFFER ? 261 : (short) 8 * 0xFF;
     
     // Buffer size for large incoming/outgoing traffic. 
     // TODO: change it to larger size for, e.g. pictures (0x1000)
-    public static final short MAXCHUNKSIZE = (short) 8*0xFF; // For APDU chaining: multiple of APDU size 
+    public static final short MAXCHUNKSIZE = (short) 8 * 0xFF; // For APDU chaining: multiple of APDU size
+    
     private static final short LARGEBUFFERSIZE = MAXCHUNKSIZE + 5; // APDU_HEADER_SIZE = 5;
     
     private static final byte VALUE_OUTGOING_EXPECTED_LENGTH = 0;
@@ -290,8 +293,8 @@ public class APDUManager {
         }
         
         ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING, true);
-        ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING_LARGEBUFFER, largeBuffer);
-
+        ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING_LARGEBUFFER, largeBuffer && FLAG_COMMON_SENDRECV_BUFFER);
+        
         return mStatusValues[VALUE_OUTGOING_EXPECTED_LENGTH];
     }
 

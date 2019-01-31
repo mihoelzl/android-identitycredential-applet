@@ -19,6 +19,7 @@ package android.security.identity_credential;
 
 import com.nxp.id.jcopx.security.CryptoBaseX;
 
+import javacard.framework.APDU;
 import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
@@ -27,6 +28,8 @@ import javacard.security.CryptoException;
 import javacard.security.ECKey;
 import javacard.security.ECPrivateKey;
 import javacard.security.ECPublicKey;
+import javacard.security.HMACKey;
+import javacard.security.KeyAgreement;
 import javacard.security.KeyBuilder;
 import javacard.security.KeyPair;
 import javacard.security.MessageDigest;
@@ -70,19 +73,6 @@ public class CryptoManager {
     public static final byte EC_KEY_SIZE = 32;
     public static final byte DIGEST_SIZE = 32;
 
-    /**
-     * Static ephemeral key for testing
-     */
-//    private static final byte[] TESTEPH_KEY = new byte[] { (byte) 0x04, (byte) 0x0E, (byte) 0xFE, (byte) 0x2F,
-//            (byte) 0x68, (byte) 0xC2, (byte) 0xA6, (byte) 0xB2, (byte) 0x15, (byte) 0xA0, (byte) 0x13, (byte) 0xFF,
-//            (byte) 0xB4, (byte) 0xDC, (byte) 0xAB, (byte) 0x62, (byte) 0x0F, (byte) 0xE0, (byte) 0xCE, (byte) 0xCE,
-//            (byte) 0xAE, (byte) 0x90, (byte) 0xA6, (byte) 0x17, (byte) 0xA2, (byte) 0x23, (byte) 0xB5, (byte) 0x1A,
-//            (byte) 0x71, (byte) 0x2B, (byte) 0xF2, (byte) 0xFE, (byte) 0xE2, (byte) 0x84, (byte) 0x75, (byte) 0xCF,
-//            (byte) 0x67, (byte) 0xE1, (byte) 0xF9, (byte) 0x68, (byte) 0xF8, (byte) 0x0A, (byte) 0xA1, (byte) 0x6F,
-//            (byte) 0xEF, (byte) 0xEE, (byte) 0x5F, (byte) 0xA5, (byte) 0xF3, (byte) 0xA1, (byte) 0xE4, (byte) 0x9C,
-//            (byte) 0x7C, (byte) 0x1B, (byte) 0x86, (byte) 0xEB, (byte) 0xF2, (byte) 0x87, (byte) 0x97, (byte) 0xDC,
-//            (byte) 0x9C, (byte) 0x7D, (byte) 0x62, (byte) 0xAA, (byte) 0xF6 };
-    
     // Hardware bound key, initialized during Applet installation
     private final AESKey mHBK;
     
@@ -101,12 +91,19 @@ public class CryptoManager {
     // Signature object for creating and verifying credential signatures 
     private final Signature mECSignature;
 
+    private final Signature mHMACSignature;
+    
     // Signature object for creating and verifying credential signatures 
     private final MessageDigest mDigest;
     
+    // Key for authentication signature computation
+    private final HMACKey mHMACauthKey;
+    
+    // Helper object to compute the HMAC key from reader ephemeral public key and signing key 
+    private final KeyAgreement mAuthentKeyGen;
+    
     // Random data generator 
     private final RandomData mRandomData;
-    //TODO: implement my own counter based IV generator
     
     // Reference to the internal APDU manager instance
     private final APDUManager mAPDUManager;
@@ -170,13 +167,19 @@ public class CryptoManager {
         mECSignature = Signature.getInstance(Signature.ALG_ECDSA_SHA_256, false);
         
         mDigest = MessageDigest.getInstance(MessageDigest.ALG_SHA_256, false);
+
+        mHMACauthKey = (HMACKey) KeyBuilder.buildKey(KeyBuilder.TYPE_HMAC_TRANSIENT_DESELECT,
+                (short) (KeyBuilder.LENGTH_HMAC_SHA_256_BLOCK_64 * 8), false);
+        mHMACSignature = Signature.getInstance(Signature.ALG_HMAC_SHA_256, false);
+
+        mAuthentKeyGen= KeyAgreement.getInstance(KeyAgreement.ALG_EC_SVDP_DH_PLAIN, false);
         
         mAPDUManager = apduManager;
         mAccessControlManager = accessControlManager;
         mCBORDecoder = decoder;
         mCBOREncoder = encoder;
     }
-
+    
     /**
      * Reset the internal state. Resets the credential private key, the storage key
      * as well as all status flags.
@@ -534,8 +537,6 @@ public class CryptoManager {
         short inOffset = mAPDUManager.getOffsetIncomingData();
 
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
-        // TODO decode the attestation challenge and the attestation id
-
         mAPDUManager.setOutgoing(true);
         byte[] outBuffer = mAPDUManager.getSendBuffer();
         mCBOREncoder.init(outBuffer, (short) 0, mAPDUManager.getOutbufferLength());
@@ -549,7 +550,8 @@ public class CryptoManager {
         short encodedLocation = mCBOREncoder.startByteString((short) 0x200);
 
         short certLen = createSigningKeyCertificate((ECPrivateKey) mCredentialECKeyPair.getPrivate(),
-                (ECPublicKey) mCredentialECKeyPair.getPublic(), outBuffer, encodedLocation);
+                (ECPublicKey) mCredentialECKeyPair.getPublic(), receiveBuffer, inOffset, receivingLength, outBuffer,
+                encodedLocation);
 
         // Set the actual size
         Util.setShort(outBuffer, (short) (encodedLocation - 2), certLen);
@@ -1223,7 +1225,8 @@ public class CryptoManager {
         encodedLocation = mCBOREncoder.startByteString((short) 0x200); 
 
         short certLen = createSigningKeyCertificate((ECPrivateKey) mCredentialECKeyPair.getPrivate(),
-                (ECPublicKey) mTempECKeyPair.getPublic(), outBuffer, encodedLocation);
+                (ECPublicKey) mTempECKeyPair.getPublic(), mTempBuffer, (short) 0, (short) 0, outBuffer,
+                encodedLocation);
 
         // Set the actual size
         Util.setShort(outBuffer, (short) (encodedLocation - 2), certLen);
@@ -1243,17 +1246,28 @@ public class CryptoManager {
      * @param publicKey            Public key that should be signed.
      * @param outCertificateBuffer Output buffer for the certificate.
      * @param outOffset            Offset into output buffer.
+     * @param encodedLocation 
+     * @param outBuffer 
+     * @param receivingLength 
      * @return Number of bytes written to output buffer.
      */
     private short createSigningKeyCertificate(ECPrivateKey signingKey, ECPublicKey publicKey,
-            byte[] outCertificateBuffer, short outOffset) {
+            byte[] challengeBuffer, short challengeOffset, short challengeLength, byte[] outCertificateBuffer, short outOffset) {
         short certLen = (short) ICConstants.X509_CERT_BASE.length;
         // Copy the base
         Util.arrayCopyNonAtomic(ICConstants.X509_CERT_BASE, (short) 0, outCertificateBuffer, outOffset, certLen);
         
-        // Update the serial number (random 8 bytes)
-        mRandomData.generateData(outCertificateBuffer, (short) (outOffset + ICConstants.X509_CERT_POS_SERIAL_NUM),
-                ICConstants.X509_CERT_SERIAL_NUMBER_LEN);
+        if(challengeLength== 0) {
+            // Update the serial number (random 8 bytes)
+            mRandomData.generateData(outCertificateBuffer, (short) (outOffset + ICConstants.X509_CERT_POS_SERIAL_NUM),
+                    ICConstants.X509_CERT_SERIAL_NUMBER_LEN);
+        } else {
+            if(challengeLength != ICConstants.X509_CERT_SERIAL_NUMBER_LEN) {
+                ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            }
+            Util.arrayCopyNonAtomic(challengeBuffer, challengeOffset, outCertificateBuffer,
+                    (short) (outOffset + ICConstants.X509_CERT_POS_SERIAL_NUM), challengeLength);
+        }
         
         // TODO: add validity period: use time source from user authentication token?
         
@@ -1307,7 +1321,8 @@ public class CryptoManager {
         
         // Input is encoded as createSignature = [
         //        bstr,   ; previousAuditSignatureHash
-        //        bstr    ; signingKeyBlob 
+        //        bstr,   ; signingKeyBlob 
+        //        bstr    ; reader public key
         //   ]
 
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
@@ -1319,14 +1334,14 @@ public class CryptoManager {
         mCBORDecoder.increaseOffset(previousHashLen);
         
         // Get the signing key blob location and length
-        short signingKeyBlobLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-        short signingKeyBlobOffset = mCBORDecoder.getCurrentOffsetAndIncrease(signingKeyBlobLen);
+        short keyBlobLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+        short keyBlobOffset = mCBORDecoder.getCurrentOffsetAndIncrease(keyBlobLen);
         
         if(previousHashLen != DIGEST_SIZE) {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
         
-        // Finish computing the new auditSignatureHash
+        // Finish computing the new auditLogEntry signature 
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);
         
         // Compute the responseHash 
@@ -1335,8 +1350,8 @@ public class CryptoManager {
 
         short hashEnd = mCBOREncoder.getCurrentOffset();
         
-        // Add the response hash to the auditLog
-        mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
+        // Add the response hash to the auditLog signature
+        mECSignature.update(mTempBuffer, (short) 0, hashEnd);
         
         // Add previousAuditSignatureHash to the auditLog and sign the auditLogentry
         short signatureLen = mECSignature.sign(receiveBuffer, previousHashOffset, previousHashLen, mTempBuffer,
@@ -1359,21 +1374,33 @@ public class CryptoManager {
         
         try {
             // Decrypt signing key
-            signingKeyBlobLen = decryptCredentialData(receiveBuffer, signingKeyBlobOffset, signingKeyBlobLen,
+            keyBlobLen = decryptCredentialData(receiveBuffer, keyBlobOffset, keyBlobLen,
                     mTempBuffer, TEMP_BUFFER_DOCTYPE_POS, mStatusWords[STATUS_DOCTYPE_LEN], mTempBuffer, hashEnd);
     
             // Set the signing key
             ECPrivateKey signingKey = ((ECPrivateKey) mTempECKeyPair.getPrivate());
-            signingKey.setS(mTempBuffer, hashEnd, signingKeyBlobLen);
-    
+            signingKey.setS(mTempBuffer, hashEnd, keyBlobLen);
+            
+            // Compute the authentication key with the signing key and the reader ephemeral public key 
+            keyBlobLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+            keyBlobOffset = mCBORDecoder.getCurrentOffsetAndIncrease(keyBlobLen);
+
+            mAuthentKeyGen.init(signingKey);
+            signatureLen = mAuthentKeyGen.generateSecret(receiveBuffer, keyBlobOffset, keyBlobLen, mTempBuffer, (short) 0);
+
+            // Initialize the authentication key as HMAC key
+            mHMACauthKey.setKey(mTempBuffer, (short) 0, signatureLen);
+            
             // Sign the actual request (precomputed hash in digest object -> see above)
-            mECSignature.init(signingKey, Signature.MODE_SIGN);
-            signatureLen = mECSignature.signPreComputedHash(mTempBuffer, hashBegin, (short) (hashEnd - hashBegin), mTempBuffer, (short) 0);
-    
+            mHMACSignature.init(mHMACauthKey, Signature.MODE_SIGN);
+            signatureLen = mHMACSignature.sign(mTempBuffer, hashBegin, (short) (hashEnd - hashBegin), mTempBuffer, (short) 0);
             mCBOREncoder.encodeByteString(mTempBuffer, (short) 0, signatureLen);
             
             mAPDUManager.setOutgoingLength(mCBOREncoder.getCurrentOffset());
         } catch (CryptoException e) {
+            outBuffer[0] = (byte) (e.getReason() & 0xff);
+            APDU.getCurrentAPDU().setOutgoingLength((short) 1);
+            APDU.getCurrentAPDU().sendBytesLong(outBuffer, (short) 0, (short) 1);
             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
         } finally {
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_STARTED, false);
