@@ -870,7 +870,7 @@ public class CryptoManager {
         
         // Add requestHash
         mDigest.reset();
-        mDigest.doFinal(readerAuthDataBuffer, readerAuthDataOffset, readerAuthDataOffset, mTempBuffer, mCBOREncoder.startByteString(DIGEST_SIZE));
+        mDigest.doFinal(readerAuthDataBuffer, readerAuthDataOffset, readerAuthDataLen, mTempBuffer, mCBOREncoder.startByteString(DIGEST_SIZE));
         mECSignature.update(mTempBuffer, (short) 0, mCBOREncoder.getCurrentOffset());
         // responseHash and previousAdutiSignatureHash will be added in processSignDataRequest
         
@@ -1048,8 +1048,9 @@ public class CryptoManager {
             } catch (CryptoException e) {
                 ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
             }
-            
+
             short dataOffset = (short) 0;
+            short dataLen = len;
             mCBORDecoder.init(outBuffer, dataOffset, len);
             
             if ((entryStatus & 0x2) == 0x2) {
@@ -1058,7 +1059,7 @@ public class CryptoManager {
                 // Read length information (move offset to actual data)  
                 mCBORDecoder.readLength();
                 dataOffset = mCBORDecoder.getCurrentOffset();
-                len -= dataOffset;
+                dataLen -= dataOffset;
             }
             
             // Indicate that data was successfully decrypted (required if a final
@@ -1066,7 +1067,7 @@ public class CryptoManager {
             ICUtil.setBit(mStatusFlags, FLAG_CREDENIAL_RETRIEVAL_CHUNKED, true); 
             
             // Add the value to the signature
-            mDigest.update(outBuffer, dataOffset, len);
+            mDigest.update(outBuffer, dataOffset, dataLen);
             
             mAPDUManager.setOutgoingLength(len);
         } else {
@@ -1327,19 +1328,20 @@ public class CryptoManager {
 
         mCBORDecoder.init(receiveBuffer, inOffset, receivingLength);
         mCBORDecoder.readMajorType(CBORBase.TYPE_ARRAY);
-        
+
         // Include the type and length information 
         short previousHashOffset = mCBORDecoder.getCurrentOffset();
         short previousHashLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-        mCBORDecoder.increaseOffset(previousHashLen);
-        
-        // Get the signing key blob location and length
-        short keyBlobLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
-        short keyBlobOffset = mCBORDecoder.getCurrentOffsetAndIncrease(keyBlobLen);
         
         if(previousHashLen != DIGEST_SIZE) {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
         }
+        // Compute the full length (including header
+        previousHashLen = (short) (mCBORDecoder.increaseOffset(previousHashLen) - previousHashOffset);
+        
+        // Get the signing key blob location and length
+        short keyBlobLen = mCBORDecoder.readMajorType(CBORBase.TYPE_BYTE_STRING);
+        short keyBlobOffset = mCBORDecoder.getCurrentOffsetAndIncrease(keyBlobLen);
         
         // Finish computing the new auditLogEntry signature 
         mCBOREncoder.init(mTempBuffer, (short) 0, TEMP_BUFFER_SIZE);

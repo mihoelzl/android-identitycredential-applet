@@ -471,7 +471,7 @@ public class AccessControlManager {
                             ISOException.throwIt(ISO7816.SW_SECURITY_STATUS_NOT_SATISFIED);
                         }
                     }
-                } else if (keyLength == (short) ICConstants.CBOR_MAPKEY_CAPABILITYTYPE.length) { // user authentication 
+                } else if (keyLength == (short) ICConstants.CBOR_MAPKEY_CAPABILITYTYPES.length) { // user authentication 
                     mCBORDecoder.increaseOffset(keyLength);
                     
                     if (!verifyUserACP(receiveBuffer)) {

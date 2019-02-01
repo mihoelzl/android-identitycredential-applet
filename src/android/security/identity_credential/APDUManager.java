@@ -24,16 +24,18 @@ import javacard.framework.Util;
 
 public class APDUManager {
 
+    // Flag can be set to only initialize one large buffer for sending and receiving.
+    // Potential issue of setting this flag: certain card implementation have issues
+    // with decrypting data into the same buffer as where the cipher text is located 
     private static final boolean FLAG_COMMON_SENDRECV_BUFFER = false;
     
-    // Buffer size for processing outgoing traffic
-    private static final short BUFFER_SIZE = FLAG_COMMON_SENDRECV_BUFFER ? 261 : (short) 8 * 0xFF;
-    
     // Buffer size for large incoming/outgoing traffic. 
-    // TODO: change it to larger size for, e.g. pictures (0x1000)
-    public static final short MAXCHUNKSIZE = (short) 8 * 0xFF; // For APDU chaining: multiple of APDU size
+    public static final short MAXCHUNKSIZE = (short) 8 * 0xFF; 
+
+    // Buffer size for processing outgoing traffic
+    private static final short SEND_BUFFER_SIZE = FLAG_COMMON_SENDRECV_BUFFER ? 261 : MAXCHUNKSIZE;
     
-    private static final short LARGEBUFFERSIZE = MAXCHUNKSIZE + 5; // APDU_HEADER_SIZE = 5;
+    private static final short LARGE_RECV_BUFFERSIZE = MAXCHUNKSIZE + 5; // APDU_HEADER_SIZE = 5;
     
     private static final byte VALUE_OUTGOING_EXPECTED_LENGTH = 0;
     private static final byte VALUE_OUTGOING_LENGTH = 1;
@@ -57,14 +59,17 @@ public class APDUManager {
     private final byte[] mLargeSendAndRecvBuffer;
     
     // Buffer only for sending data (smaller chunks)
-    private byte[] mSendBuffer;
+    private final byte[] mSendBuffer;
 
     public APDUManager(byte cryptoHeaderOverhead) {
         mStatusValues = JCSystem.makeTransientShortArray(STATUS_VALUES_SIZE, JCSystem.CLEAR_ON_DESELECT);
         mStatusFlags = JCSystem.makeTransientByteArray(STATUS_FLAGS_SIZE, JCSystem.CLEAR_ON_DESELECT);
-        
+
         // TODO: evaluate if we should use flash memory for the large buffer
-        mLargeSendAndRecvBuffer = JCSystem.makeTransientByteArray((short) (LARGEBUFFERSIZE + cryptoHeaderOverhead),
+        mLargeSendAndRecvBuffer = JCSystem.makeTransientByteArray(
+                (short) (LARGE_RECV_BUFFERSIZE + cryptoHeaderOverhead), JCSystem.CLEAR_ON_DESELECT);
+
+        mSendBuffer = JCSystem.makeTransientByteArray((short) (SEND_BUFFER_SIZE + cryptoHeaderOverhead),
                 JCSystem.CLEAR_ON_DESELECT);
     }
 
@@ -157,12 +162,7 @@ public class APDUManager {
             ICUtil.setBit(mStatusFlags, FLAG_APDU_OUTGOING_LARGEBUFFER, false);
             ICUtil.setBit(mStatusFlags, FLAG_APDU_RECEIVED_LARGEBUFFER, false);
         }
-        
-        if (mSendBuffer == null) {
-            short bufferSize = ICUtil.max(BUFFER_SIZE, (short)buf.length); // extended length APDUs?
-            mSendBuffer = JCSystem.makeTransientByteArray(bufferSize, JCSystem.CLEAR_ON_DESELECT);
-        }
-        
+               
         return true;
     }
 
@@ -218,7 +218,7 @@ public class APDUManager {
         if(ICUtil.getBit(mStatusFlags, FLAG_APDU_OUTGOING_LARGEBUFFER)) {
             return MAXCHUNKSIZE;
         }
-        return BUFFER_SIZE;
+        return SEND_BUFFER_SIZE;
     }
 
     /**
